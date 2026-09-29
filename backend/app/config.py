@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     static_dir: Path = Path("./static")
     models_config: Path = Path("./config/models.yaml")
+    library_root: Path = Path("./library")
+    library_host_path: str = "./library"
+    library_scan_interval: int = 30
 
     aws_dir: Path = Path.home() / ".aws"
     aws_profile: str = "default"

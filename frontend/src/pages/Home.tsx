@@ -24,7 +24,7 @@ export default function Home() {
               データベース: {health.database.ok ? "接続OK" : "接続エラー"}（{health.database.detail}）
             </li>
             <li className={health.storage.ok ? "status ok" : "status bad"}>
-              文書の保存先: {health.storage.ok ? "OK" : "見つかりません"}（{health.storage.path}）
+              資料室のフォルダ: {health.storage.ok ? "OK" : "見つかりません"}（{health.storage.path}）
             </li>
             <li className="muted">バージョン {health.version}</li>
           </ul>

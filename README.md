@@ -3,7 +3,7 @@
 AI社員に仕事を任せる、あなただけの仮想オフィス。
 
 あなたはオフィス長です。LLMで動く「社員」を雇い、プロジェクトを立ち上げてアサインし、バックログのタスクを任せて、成果物を承認します。
-社員はプロジェクトにリンクされた「バケット」（共有の文書置き場）の資料を読み、成果物をバケットに保存します。
+社員はプロジェクトにリンクされた「資料室」（共有の文書置き場）の資料を読み、成果物を資料室に保存します。
 
 > **English:** makaseta ("I'll leave it to you" in Japanese) is a self-hosted virtual office where you manage LLM agents as employees: hire them, assign them to project backlogs, and review their deliverables. Runs locally with Docker; supports Claude (Anthropic API or AWS Bedrock), OpenAI, Gemini and DeepSeek.
 
@@ -14,7 +14,7 @@ AI社員に仕事を任せる、あなただけの仮想オフィス。
 - **社員（AIエージェント）を雇う**: 役職、性格、スキル、使うモデルを設定
 - **プロジェクトとバックログ**: タスクはプロジェクトに積み、社員をアサインして消化
 - **マネージャー社員が窓口**: 依頼を分解して社員に割り振り、取りまとめる
-- **バケット**: SharePointのような文書置き場。プロジェクトごとに読み取り専用／読み書きでリンク
+- **資料室**: 手元のフォルダがそのまま文書置き場になる。プロジェクトごとに読み取り専用／読み書きでリンク
 - **ローカルで完結**: Docker Composeで起動し、データはすべて手元の `./data` に保存
 - **LLMを選べる**: Anthropic API・AWS Bedrock（Claude）、OpenAI、Gemini、DeepSeek
 
@@ -75,14 +75,33 @@ MAKASETA_BIND=0.0.0.0
 
 APIキーは `.env` にだけ置き、画面やログには出しません。`.env` はGitにコミットされません。
 
+## 資料室（社員が読む資料の置き場）
+
+ホストの `./library` フォルダが資料室の置き場です。直下のフォルダ1つが1つの資料室になります。
+
+```
+library/
+├── 社内規程/          ← 資料室「社内規程」
+│   ├── 出張規程.md
+│   └── 人事/経費精算.pdf
+└── 営業資料/          ← 資料室「営業資料」
+```
+
+- エクスプローラーや `cp` でファイルを置けば、30秒以内に自動で取り込まれます（画面の「再読み込み」ですぐ反映もできます）。
+- 画面からも、資料室やフォルダの作成、アップロード、Markdownメモの作成と編集、削除ができます。
+- Markdown・テキスト・CSV・PDF・Word・Excel・PowerPoint からテキストを取り出し、日本語で全文検索できます。Shift_JIS のテキストも読めます。
+- 名前が `.` で始まるファイルとフォルダは無視されます。
+- 別の場所（例: Windows のフォルダ `/mnt/c/Users/you/Documents/makaseta`）を使う場合は、`.env` の `LIBRARY_DIR` を変更します。
+
 ## データの保存場所
 
 | パス | 中身 |
 | --- | --- |
 | `./data/postgres` | データベース（社員、プロジェクト、タスク、会話など） |
-| `./data/files` | バケットの文書ファイル |
+| `./library` | 資料室のファイル（`LIBRARY_DIR` で変更可） |
+| `./data/files` | 社員の作業用ファイル（今後使用） |
 
-バックアップは、コンテナを止めてから `./data` をコピーするだけです。
+バックアップは、コンテナを止めてから `./data` と `./library` をコピーするだけです。
 
 ## 開発
 

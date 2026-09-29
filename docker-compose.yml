@@ -24,8 +24,11 @@ services:
       DATA_DIR: /data
       MODELS_CONFIG: /app/config/models.yaml
       AWS_DIR: /home/app/.aws
+      LIBRARY_ROOT: /library
+      LIBRARY_HOST_PATH: ${LIBRARY_DIR:-./library}
     volumes:
       - ./data/files:/data/files
+      - ${LIBRARY_DIR:-./library}:/library
       - ./config:/app/config:ro
       - ${AWS_CONFIG_DIR:-~/.aws}:/home/app/.aws:ro
     depends_on:

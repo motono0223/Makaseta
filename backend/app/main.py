@@ -9,31 +9,37 @@ from . import __version__
 from .catalog import seed_builtin_skills
 from .config import get_settings
 from .db import check_database, run_migrations, session_factory
+from .library import Scanner
 from .llm_profiles import ModelProfile, load_profiles
-from .routers import agents
+from .routers import agents, library
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     run_migrations()
     with session_factory()() as session:
         seed_builtin_skills(session)
+    get_settings().library_root.mkdir(parents=True, exist_ok=True)
+    app.state.scanner = Scanner(session_factory, get_settings().library_scan_interval)
+    app.state.scanner.start()
     yield
+    app.state.scanner.stop()
 
 
 app = FastAPI(title="makaseta", version=__version__, lifespan=lifespan)
 app.include_router(agents.router)
+app.include_router(library.router)
 
 
 @app.get("/api/health")
 def health() -> dict:
     db_ok, db_detail = check_database()
-    files_dir = get_settings().data_dir / "files"
+    settings = get_settings()
     return {
         "status": "ok" if db_ok else "degraded",
         "version": __version__,
         "database": {"ok": db_ok, "detail": db_detail},
-        "storage": {"ok": files_dir.is_dir(), "path": str(files_dir)},
+        "storage": {"ok": settings.library_root.is_dir(), "path": settings.library_host_path},
     }
 
 

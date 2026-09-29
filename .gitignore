@@ -7,6 +7,10 @@ data/*
 data/files/*
 !data/files/.gitkeep
 
+# 資料室 contents live on the host, not in git
+library/*
+!library/.gitkeep
+
 # python
 __pycache__/
 *.pyc
