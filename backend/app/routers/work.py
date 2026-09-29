@@ -90,6 +90,8 @@ class TaskWork(BaseModel):
     deliverables: list[DeliverableOut]
     question: MessageOut | None
     report: MessageOut | None
+    # The reviewer agent's latest verdict, shown to the office head with the report.
+    peer_review: MessageOut | None = None
 
 
 class TextIn(BaseModel):
@@ -107,6 +109,8 @@ class PlanItemOut(BaseModel):
     expected_output: str
     assignee_id: int | None
     assignee_name: str | None
+    reviewer_id: int | None = None
+    reviewer_name: str | None = None
     priority: str
     depends_on: list[int]
 
@@ -151,7 +155,7 @@ class UsageSummary(BaseModel):
 @router.get("/tasks/{task_id}/work")
 def task_work(task_id: int, session: SessionDep) -> TaskWork:
     task = _task(session, task_id)
-    runs = list(session.scalars(select(Run).where(Run.task_id == task.id, Run.kind == "task")
+    runs = list(session.scalars(select(Run).where(Run.task_id == task.id, Run.kind.in_(("task", "review")))
                                 .order_by(Run.id.desc())))
     steps: dict[int, list[RunStep]] = {}
     if runs:
@@ -175,8 +179,10 @@ def task_work(task_id: int, session: SessionDep) -> TaskWork:
     if review is not None:
         report = session.scalar(select(Message).where(Message.run_id == review.id, Message.kind == "report",
                                                       Message.sender == "agent").order_by(Message.id.desc()))
+    peer_review = session.scalar(select(Message).where(Message.task_id == task.id, Message.sender == "agent",
+                                                       Message.kind == "review").order_by(Message.id.desc()))
     return TaskWork(runs=run_out, deliverables=[_deliverable_out(d) for d in deliverables], question=question,
-                    report=report)
+                    report=report, peer_review=peer_review)
 
 
 @router.post("/tasks/{task_id}/answer")
@@ -365,7 +371,7 @@ def inbox(session: SessionDep) -> list[InboxItem]:
                                .order_by(Message.id.desc()))
             items.append(item("question", task, q.body if q else "", q.created_at if q else task.updated_at,
                               run.agent_id))
-        elif task.status == "review":
+        elif task.status == "review" and task.review_stage != "peer":
             review = work.run_awaiting_review(session, task)
             items.append(item("review", task, "成果物の確認をお願いします", review.ended_at if review and review.ended_at
                               else task.updated_at, task.assignee_id))
@@ -451,7 +457,8 @@ def _plan_out(session: Session, plan: Plan) -> PlanOut:
     return PlanOut(
         id=plan.id, project_id=plan.project_id, agent_id=plan.agent_id, request=plan.request, status=plan.status,
         summary=plan.summary,
-        items=[PlanItemOut(**item, assignee_name=names.get(item.get("assignee_id"))) for item in plan.items],
+        items=[PlanItemOut(**item, assignee_name=names.get(item.get("assignee_id")),
+                           reviewer_name=names.get(item.get("reviewer_id"))) for item in plan.items],
         run_status=run.status if run else None, run_error=run.error if run else "", task_ids=list(task_ids),
         created_at=plan.created_at, decided_at=plan.decided_at,
     )

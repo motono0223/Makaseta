@@ -12,6 +12,7 @@ const KIND_LABEL: Partial<Record<Message["kind"], string>> = {
   answer: "回答",
   request: "依頼",
   plan: "計画",
+  consult: "相談",
 };
 
 type Props = { messages: Message[]; agents: Map<number, AgentBrief>; pending?: boolean };

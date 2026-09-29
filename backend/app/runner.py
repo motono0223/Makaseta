@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from . import work
-from .agent_tools import PAUSING, ToolContext, ToolFailure, describe_call, run_tool, tools_for
+from .agent_tools import PAUSING, RUNNER_TOOLS, ToolContext, ToolFailure, describe_call, run_tool, tools_for
 from .config import get_settings
 from .llm import LLMError, Model, check_budget, open_model, record_usage
 from .models import Agent, AgentNote, Deliverable, Message, Plan, Project, Run, RunStep, Task
@@ -20,6 +20,7 @@ THREAD_HISTORY = 30
 NOTES_IN_PROMPT = 40
 MAX_NEW_NOTES = 3
 NOTE_LIMIT = 200
+MAX_CONSULTS_PER_RUN = 5
 LOG_TEXT_LIMIT = 4000
 PRIORITY_LABEL = {"high": "高", "normal": "中", "low": "低"}
 
@@ -36,6 +37,8 @@ def execute(session: Session, run_id: int) -> None:
             _plan_request(session, run, agent)
         elif run.kind == "reflect":
             _reflect(session, run, agent)
+        elif run.kind == "review":
+            _review_task(session, run, agent)
         else:
             _work_on_task(session, run, agent)
     except LLMError as exc:
@@ -99,7 +102,8 @@ PLAN_RULES = """
 - オフィス長の依頼を、メンバーが1人で終えられる大きさのタスクに分けて計画します。
 - まず list_members でメンバーのロールとスキルを確認します。必要なら資料室も調べます。
 - 各タスクには担当者・具体的な指示・期待する成果物を書きます。前のタスクの結果が必要なら depends_on で順序を示します。
-- ロールに合う担当者を選び、1人に偏らないようにします（調査は調査担当、文章は資料作成者、確認はレビュアー）。
+- ロールに合う担当者を選び、1人に偏らないようにします（調査は調査担当、文章は資料作成者）。
+- 成果物のあるタスクには、レビュアーのロールのメンバーを reviewer に指定します。確認だけのタスクは作らず、reviewer で済ませます。
 - あなた自身の取りまとめタスクは最後に自動で追加されるので、計画には含めません。
 - 依頼があいまいで計画が立てられないときは ask_manager で確認します。
 - 計画ができたら propose_plan で提案します。
@@ -170,13 +174,41 @@ def plan_brief(project: Project, plan: Plan) -> str:
     ])
 
 
-# ---- tool loops: working on a task, or planning a request ----
+def review_brief(session: Session, project: Project, task: Task, reviewer: Agent) -> str:
+    assignee = session.get(Agent, task.assignee_id) if task.assignee_id else None
+    report = session.scalar(select(Message).where(Message.task_id == task.id, Message.sender == "agent",
+                                                  Message.kind == "report", Message.agent_id == task.assignee_id)
+                            .order_by(Message.id.desc()))
+    return "\n".join(_project_section(project) + [
+        "", "## レビューするタスク",
+        f"タイトル: {task.title}", f"担当: {assignee.name if assignee else '不明'}",
+        f"指示: {task.instructions or '（タイトルのとおり）'}",
+        f"期待する成果物: {task.expected_output or '（指定なし）'}",
+        "", "## 担当者の報告", report.body if report else "（報告なし）",
+        "", "## あなたの役割",
+        f"{reviewer.name}さんは、このタスクのレビュー担当です。read_deliverables で成果物を読み、必要なら資料室で根拠を確かめます。",
+        "指示と期待する成果物を満たしているか、事実の誤りや根拠のない記述、抜け漏れがないかを確認します。",
+        "問題がなければ approve_work で、オフィス長向けの所見を添えて回します。",
+        "直すべき点があれば request_changes で、担当者に具体的に伝えます。好みの問題や細かすぎる点では差し戻しません。",
+        f"（このタスクの差し戻し: {task.peer_rounds}/{work.MAX_PEER_ROUNDS}回）",
+    ])
+
+
+# ---- tool loops: working on a task, planning a request, or reviewing a colleague's task ----
 
 def _work_on_task(session: Session, run: Run, agent: Agent) -> None:
     task = session.get(Task, run.task_id)
     project = session.get(Project, run.project_id)
     _loop(session, run, agent, project, task=task, plan=None, rules=TASK_RULES,
           first=lambda: task_brief(session, project, task, agent), start_note=f"タスク「{task.title}」に着手します。")
+
+
+def _review_task(session: Session, run: Run, agent: Agent) -> None:
+    task = session.get(Task, run.task_id)
+    project = session.get(Project, run.project_id)
+    _loop(session, run, agent, project, task=task, plan=None, rules="", review=True,
+          first=lambda: review_brief(session, project, task, agent),
+          start_note=f"タスク「{task.title}」のレビューを始めます。")
 
 
 def _plan_request(session: Session, run: Run, agent: Agent) -> None:
@@ -187,11 +219,11 @@ def _plan_request(session: Session, run: Run, agent: Agent) -> None:
 
 
 def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: Task | None, plan: Plan | None,
-          rules: str, first, start_note: str) -> None:
-    kind = "plan" if plan is not None else "task"
+          rules: str, first, start_note: str, review: bool = False) -> None:
+    kind = "plan" if plan is not None else "review" if review else "task"
     model = open_model(agent.model_profile)
     ctx = ToolContext.build(session, agent, project, task, kind, plan.id if plan else None)
-    system = [{"type": "text", "text": persona(agent) + "\n\n" + rules}]
+    system = [{"type": "text", "text": persona(agent) + ("\n\n" + rules if rules else "")}]
     tools = tools_for(agent, kind)
     messages: list[dict] = list(run.transcript)
     if not messages:
@@ -218,7 +250,7 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
             _save(run, messages)
             raise LLMError(f"1回の作業の上限（{max_steps}ステップ）に達したため止めました。指示を具体的にして再実行してください")
         check_budget(session)
-        if task is not None:
+        if task is not None and kind == "task":
             _inject_instructions(session, run, task, messages)
 
         response = model.create(system=system, tools=tools, messages=messages, cache_control={"type": "ephemeral"})
@@ -240,8 +272,9 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
         if not tool_uses:
             if not nudged:
                 nudged = True
-                nudge = ("計画ができたら propose_plan で提案してください。" if plan is not None
-                         else "作業を続けてください。終わっているなら finish で報告してください。")
+                nudge = {"plan": "計画ができたら propose_plan で提案してください。",
+                         "review": "レビューが終わったら approve_work か request_changes で結果を返してください。"}.get(
+                    kind, "作業を続けてください。終わっているなら finish で報告してください。")
                 messages.append({"role": "user", "content": [{"type": "text", "text": nudge}]})
                 _save(run, messages)
                 session.commit()
@@ -249,6 +282,9 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
             if plan is not None:
                 _save(run, messages)
                 raise LLMError("マネージャーが計画を提案しませんでした。依頼を具体的にして、もう一度依頼してください")
+            if kind == "review":
+                _save(run, messages)
+                raise LLMError("レビュー担当が結論を出しませんでした")
             summary = next((b["text"] for b in reversed(content) if b["type"] == "text"), "（報告なし）")
             _finish_without_tool(session, run, agent, task, messages, summary)
             return
@@ -262,6 +298,9 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
                     continue
             if use["name"] in PAUSING and pause is None:
                 pause = use
+                continue
+            if use["name"] in RUNNER_TOOLS and use["name"] in ctx.allowed:
+                results.append(_consult(session, run, agent, project, task, use))
                 continue
             results.append(_call_tool(session, run, ctx, use))
         if pause is not None:
@@ -306,6 +345,16 @@ def _pause(session: Session, run: Run, agent: Agent, project: Project, task: Tas
         run.status = "waiting"
         if task is not None:
             work.place_task(session, task, "waiting")
+    elif use["name"] in ("approve_work", "request_changes"):
+        comment = str(args.get("comment", "")).strip() or "（コメントなし）"
+        _step(session, run, "tool_call", use["name"], comment)
+        if use["name"] == "approve_work":
+            work.peer_approve(session, task, agent, comment)
+        else:
+            work.peer_request_changes(session, task, agent, comment)
+        run.status = "succeeded"
+        run.ended_at = work.now()
+        run.pending_tool_use_id = None
     elif use["name"] == "propose_plan":
         summary = str(args.get("summary", "")).strip()
         _step(session, run, "tool_call", "propose_plan", summary)
@@ -339,6 +388,43 @@ def _report(session: Session, run: Run, agent: Agent, task: Task, summary: str) 
     run.status = "succeeded"
     run.ended_at = work.now()
     work.place_task(session, task, "review")
+    work.send_to_review(session, task)
+
+
+def _consult(session: Session, run: Run, agent: Agent, project: Project, task: Task | None, use: dict) -> dict:
+    """ask_colleague: the named member answers from its own notes and workload, right away."""
+    args = use.get("input") or {}
+    name, question = str(args.get("name", "")).strip(), str(args.get("question", "")).strip()
+    _step(session, run, "tool_call", "ask_colleague", f"{name}さんへ: {question}")
+    asked = session.scalar(select(func.count()).select_from(RunStep).where(
+        RunStep.run_id == run.id, RunStep.name == "ask_colleague", RunStep.kind == "tool_call")) or 0
+    colleague = next((m.agent for m in project.members
+                      if m.agent.name == name and m.agent.active and m.agent_id != agent.id), None)
+    if asked > MAX_CONSULTS_PER_RUN:
+        return _error_result(session, run, use, f"1回の作業で相談できるのは{MAX_CONSULTS_PER_RUN}回までです。", logged=True)
+    if colleague is None:
+        others = "、".join(m.agent.name for m in project.members if m.agent.active and m.agent_id != agent.id)
+        return _error_result(session, run, use, f"「{name}」さんに相談できません（相談できるメンバー: {others or 'なし'}）",
+                             logged=True)
+    model = open_model(colleague.model_profile)
+    check_budget(session)
+    context = f"タスク「{task.title}」を担当中" if task else "計画づくり中"
+    system = [{"type": "text", "text": persona(colleague) + "\n\n" + "\n".join([
+        "## 同僚からの相談",
+        f"プロジェクト「{project.name}」のメンバーの{agent.name}さんから相談を受けています。",
+        "自分の知識・業務メモ・担当状況・これまでの報告に基づいて、簡潔に具体的に答えます。分からないことは分からないと答えます。",
+        "", *_task_lines(session, colleague), "", *_recent_reports(session, colleague, project)])}]
+    response = model.create(system=system, messages=[
+        {"role": "user", "content": f"{agent.name}さん（{context}）からの相談です。\n\n{question}"}])
+    record_usage(session, model, response, agent_id=colleague.id, project_id=project.id,
+                 task_id=task.id if task else None, run_id=run.id)
+    answer = "\n".join(b.text for b in response.content if b.type == "text").strip() or "（回答がありませんでした）"
+    post(session, sender="agent", kind="consult", agent_id=agent.id, project_id=project.id,
+         task_id=task.id if task else None, run_id=run.id, body=f"{colleague.name}さんに相談: {question}")
+    post(session, sender="agent", kind="consult", agent_id=colleague.id, project_id=project.id,
+         task_id=task.id if task else None, run_id=run.id, body=answer)
+    _step(session, run, "tool_result", "ask_colleague", f"{colleague.name}さんの回答: {answer}")
+    return {"type": "tool_result", "tool_use_id": use["id"], "content": f"{colleague.name}さんの回答:\n{answer}"}
 
 
 def _inject_instructions(session: Session, run: Run, task: Task, messages: list) -> None:
@@ -447,15 +533,7 @@ def _reply_in_thread(session: Session, run: Run, agent: Agent) -> None:
 
 def _status_briefing(session: Session, agent: Agent) -> str:
     """What the agent's work really looks like right now, so progress answers match the records."""
-    tasks = list(session.scalars(select(Task).where(Task.assignee_id == agent.id).order_by(Task.updated_at.desc())
-                                 .limit(20)))
-    lines = ["## あなたの担当タスク（システムの記録。状態はこれが正しい）"]
-    if not tasks:
-        lines.append("担当しているタスクはありません。")
-    for t in tasks:
-        project = session.get(Project, t.project_id)
-        lines.append(f"- 「{t.title}」（プロジェクト: {project.name if project else '不明'}）: {_task_state(session, t)}")
-    lines += [
+    lines = _task_lines(session, agent) + [
         "",
         "これはオフィス長との会話です。進捗を聞かれたら、上の記録に基づいて正確に答えます。",
         "記録にない作業を進めているとは言いません。止まっているものは止まっていると伝えます。",
@@ -464,12 +542,35 @@ def _status_briefing(session: Session, agent: Agent) -> str:
     return "\n".join(lines)
 
 
+def _task_lines(session: Session, agent: Agent) -> list[str]:
+    tasks = list(session.scalars(select(Task).where(Task.assignee_id == agent.id).order_by(Task.updated_at.desc())
+                                 .limit(20)))
+    lines = ["## あなたの担当タスク（システムの記録。状態はこれが正しい）"]
+    if not tasks:
+        lines.append("担当しているタスクはありません。")
+    for t in tasks:
+        project = session.get(Project, t.project_id)
+        lines.append(f"- 「{t.title}」（プロジェクト: {project.name if project else '不明'}）: {_task_state(session, t)}")
+    return lines
+
+
+def _recent_reports(session: Session, agent: Agent, project: Project, limit: int = 3) -> list[str]:
+    """The agent's latest finished-task reports in this project, so it can share what it found."""
+    reports = session.scalars(select(Message).where(
+        Message.agent_id == agent.id, Message.project_id == project.id, Message.sender == "agent",
+        Message.kind == "report", Message.body.contains("が終わりました")).order_by(Message.id.desc()).limit(limit))
+    blocks = [m.body for m in reports]
+    return ["## あなたの最近の報告（このプロジェクト）", *blocks] if blocks else []
+
+
 def _task_state(session: Session, task: Task) -> str:
     run = work.open_run(session, task)
     if task.status == "in_progress":
         if run is not None and run.status in ("queued", "running"):
             return "作業中（いま進めている）"
         return "作業中の列にあるが、実行中の作業はない（止まっている）"
+    if task.status == "review" and task.review_stage == "peer":
+        return "レビュー待ち（成果物を提出済み。レビュー担当の社員が確認中）"
     return {
         "backlog": "未着手（バックログ）",
         "waiting": "質問待ち（オフィス長の回答を待っている）",
@@ -517,7 +618,9 @@ def _fail(session: Session, run: Run, agent: Agent | None, reason: str) -> None:
         agent.status = "error"
         task = session.get(Task, run.task_id) if run.task_id else None
         what = ({"plan": "計画づくり", "reflect": "振り返り", "chat": "返信"}.get(run.kind)
-                or (f"タスク「{task.title}」の作業" if task else "作業"))
+                or (f"タスク「{task.title}」の{'レビュー' if run.kind == 'review' else '作業'}" if task else "作業"))
+        if run.kind == "review" and task is not None and task.review_stage == "peer":
+            task.review_stage = "manager"  # the office head reviews it instead
         post(session, sender="system", kind="report", agent_id=agent.id, project_id=run.project_id,
              task_id=run.task_id, run_id=run.id, body=f"{what}でエラーが起きました: {reason}")
     session.commit()

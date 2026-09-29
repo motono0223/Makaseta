@@ -200,6 +200,8 @@ export type Task = {
   requested_by_agent_id: number | null;
   plan_id: number | null;
   depends_on: number[];
+  review_stage: "peer" | "manager" | null;
+  peer_rounds: number;
   rank: number;
   created_at: string;
   updated_at: string;
@@ -229,7 +231,7 @@ export type Assignment = {
 export type RunStep = { id: number; kind: "text" | "tool_call" | "tool_result" | "error" | "info"; name: string; content: string; created_at: string };
 export type Run = {
   id: number;
-  kind: "task" | "chat";
+  kind: "task" | "chat" | "plan" | "reflect" | "review";
   agent_id: number;
   status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "interrupted";
   steps: number;
@@ -262,7 +264,7 @@ export type Message = {
   task_id: number | null;
   run_id: number | null;
   sender: "manager" | "agent" | "system";
-  kind: "chat" | "report" | "question" | "answer" | "instruction" | "review" | "request" | "plan";
+  kind: "chat" | "report" | "question" | "answer" | "instruction" | "review" | "request" | "plan" | "consult";
   body: string;
   created_at: string;
   awaiting_answer: boolean;
@@ -274,6 +276,8 @@ export type PlanItem = {
   expected_output: string;
   assignee_id: number | null;
   assignee_name: string | null;
+  reviewer_id: number | null;
+  reviewer_name: string | null;
   priority: Priority;
   depends_on: number[];
 };
@@ -292,7 +296,13 @@ export type Plan = {
   created_at: string;
   decided_at: string | null;
 };
-export type TaskWork = { runs: Run[]; deliverables: Deliverable[]; question: Message | null; report: Message | null };
+export type TaskWork = {
+  runs: Run[];
+  deliverables: Deliverable[];
+  question: Message | null;
+  report: Message | null;
+  peer_review: Message | null;
+};
 export type InboxItem = {
   kind: "question" | "review" | "failed" | "plan";
   task_id: number | null;

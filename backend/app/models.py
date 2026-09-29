@@ -210,6 +210,10 @@ class Task(Base):
     # Set when the task came from a manager's plan; depends_on lists task ids that must be done first.
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id", ondelete="SET NULL"))
     depends_on: Mapped[list] = mapped_column(JSON, default=list)
+    # While in review: "peer" = the reviewer agent is checking it, "manager" (or None) = waiting for the office head.
+    review_stage: Mapped[str | None] = mapped_column(String(8))
+    # How many times the reviewer agent has sent it back; after the limit it goes to the office head.
+    peer_rounds: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -241,7 +245,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # task | plan | chat | reflect
+    # task | plan | chat | reflect | review (a reviewer agent checking a task)
     kind: Mapped[str] = mapped_column(String(8), default="task")
     agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))

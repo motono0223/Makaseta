@@ -27,7 +27,12 @@ SEARCH_LIMIT = 10
 DELIVERABLE_SUFFIXES = {".md", ".txt", ".csv"}
 
 # Tools every agent has, regardless of skills, per kind of work.
-ALWAYS = {"task": ["ask_manager", "finish"], "plan": ["list_members", "ask_manager", "propose_plan"]}
+ALWAYS = {
+    "task": ["ask_colleague", "ask_manager", "finish"],
+    "plan": ["list_members", "ask_colleague", "ask_manager", "propose_plan"],
+    # A reviewer can always read what it is reviewing, whatever its skills.
+    "review": ["list_documents", "read_document", "read_deliverables", "approve_work", "request_changes"],
+}
 # Skill tools that make sense while planning (reading only; deliverables come from the tasks).
 PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document", "read_skill", "read_skill_file"}
 MAX_WORKSPACE_WRITE = 1_000_000
@@ -182,6 +187,42 @@ DEFINITIONS = {
             "required": ["path", "room", "dest_path"],
         },
     },
+    "ask_colleague": {
+        "name": "ask_colleague",
+        "description": "同じプロジェクトのメンバーに相談する（専門の知識、前の作業の意図、進め方の確認など）。"
+                       "相手はその場で答える。オフィス長の判断が必要なことは ask_manager を使う。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "相談する相手の名前"},
+                "question": {"type": "string", "description": "相談内容（背景も簡潔に）"},
+            },
+            "required": ["name", "question"],
+        },
+    },
+    "read_deliverables": {
+        "name": "read_deliverables",
+        "description": "レビュー対象のタスクで提出された成果物（下書き）を読む。",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    "approve_work": {
+        "name": "approve_work",
+        "description": "レビューの結果、問題がないと判断してオフィス長の確認に回す。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"comment": {"type": "string", "description": "オフィス長向けの所見（良い点、確認した点、気になる点）"}},
+            "required": ["comment"],
+        },
+    },
+    "request_changes": {
+        "name": "request_changes",
+        "description": "レビューの結果、直してほしい点があるので担当者に差し戻す。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"comment": {"type": "string", "description": "担当者への具体的な修正依頼（優先度の高い順）"}},
+            "required": ["comment"],
+        },
+    },
     "list_members": {
         "name": "list_members",
         "description": "このプロジェクトのメンバー（名前・ロール・役職・スキル・担当中のタスク数）を一覧する。"
@@ -206,6 +247,8 @@ DEFINITIONS = {
                             "instructions": {"type": "string", "description": "担当者への具体的な指示"},
                             "expected_output": {"type": "string", "description": "期待する成果物"},
                             "assignee": {"type": "string", "description": "担当するメンバーの名前"},
+                            "reviewer": {"type": "string",
+                                         "description": "成果物を先に確認するレビュー担当の名前（任意。担当とは別の人）"},
                             "priority": {"type": "string", "enum": ["high", "normal", "low"]},
                             "depends_on": {
                                 "type": "array",
@@ -237,7 +280,7 @@ DEFINITIONS = {
 def tools_for(agent: Agent, kind: str = "task") -> list[dict]:
     """Tool definitions for an agent's kind of work: skill tools plus the always-available ones, in a stable order."""
     names = {t for s in agent.skills if s.enabled for t in s.tools}
-    if kind == "plan":
+    if kind in ("plan", "review"):
         names &= PLAN_SKILL_TOOLS
     names |= set(ALWAYS[kind])
     return [DEFINITIONS[n] for n in DEFINITIONS if n in names]
@@ -267,7 +310,9 @@ class ToolFailure(Exception):
 
 
 # Control-flow tools: the runner handles them itself.
-PAUSING = {"ask_manager", "finish", "propose_plan"}
+PAUSING = {"ask_manager", "finish", "propose_plan", "approve_work", "request_changes"}
+# Tools the runner answers itself because they call another agent's model.
+RUNNER_TOOLS = {"ask_colleague"}
 
 
 def run_tool(ctx: ToolContext, name: str, args: dict) -> str:
@@ -497,12 +542,29 @@ def _submit_file(ctx: ToolContext, args: dict) -> str:
     return f"ファイル「{room}/{rel}」（{kept.stat().st_size} bytes）を成果物として提出しました。"
 
 
+def _read_deliverables(ctx: ToolContext, args: dict) -> str:
+    if ctx.task is None:
+        raise ToolFailure("レビュー対象のタスクがありません")
+    drafts = list(ctx.session.scalars(select(Deliverable).where(Deliverable.task_id == ctx.task.id,
+                                                                Deliverable.status == "draft")))
+    if not drafts:
+        return "提出された成果物はありません（報告のみ）。"
+    parts = []
+    for d in drafts:
+        if d.file_path:
+            parts.append(f'<deliverable room="{d.room}" path="{d.path}">（ファイル成果物のため本文は読めません）</deliverable>')
+        else:
+            parts.append(f'<deliverable room="{d.room}" path="{d.path}">\n{d.content[:READ_CHUNK]}\n</deliverable>')
+    return "\n\n".join(parts)
+
+
 _HANDLERS = {
     "search_documents": _search,
     "list_documents": _list,
     "read_document": _read,
     "submit_deliverable": _submit,
     "list_members": _members,
+    "read_deliverables": _read_deliverables,
     "read_skill": _read_skill,
     "read_skill_file": _read_skill_file,
     "run_command": _run_command,

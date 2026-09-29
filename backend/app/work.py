@@ -126,6 +126,7 @@ def approve(session: Session, task: Task) -> list[Deliverable]:
     if review is not None:
         review.pending_tool_use_id = None
         review.pending_results = []
+    cancel_peer_review(session, task)
     if task.status != "done":
         place_task(session, task, "done")
     start_ready_dependents(session, task)
@@ -141,6 +142,8 @@ def reject(session: Session, task: Task, comment: str) -> Run:
     review = run_awaiting_review(session, task)
     if review is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "差し戻せる報告がありません")
+    cancel_peer_review(session, task)
+    task.peer_rounds = 0
     for d in session.scalars(select(Deliverable).where(Deliverable.task_id == task.id,
                                                        Deliverable.status == "draft")):
         d.status = "rejected"
@@ -206,6 +209,8 @@ def on_status_change(session: Session, task: Task, old: str, new: str) -> None:
         approve(session, task)
     elif old in ("in_progress", "waiting") and new in ("backlog", "review"):
         cancel_task(session, task, "オフィス長がカードを移動しました")
+    if old == "review" and new != "review":
+        cancel_peer_review(session, task)
 
 
 # ---- dependencies ----
@@ -267,6 +272,12 @@ def validate_plan(project: Project, args: dict) -> tuple[list[dict], list[str]]:
     for number, t in enumerate(tasks, start=1):
         title = str(t.get("title", "")).strip()
         assignee = members.get(str(t.get("assignee", "")).strip())
+        reviewer_name = str(t.get("reviewer") or "").strip()
+        reviewer = members.get(reviewer_name) if reviewer_name else None
+        if reviewer_name and reviewer is None:
+            errors.append(f"{number}番目: レビュー担当「{reviewer_name}」はメンバーにいません")
+        if reviewer is not None and assignee is not None and reviewer.id == assignee.id:
+            errors.append(f"{number}番目: 担当とレビュー担当は別の人にしてください")
         deps = t.get("depends_on") or []
         if not title:
             errors.append(f"{number}番目: title が空です")
@@ -280,6 +291,7 @@ def validate_plan(project: Project, args: dict) -> tuple[list[dict], list[str]]:
             "instructions": str(t.get("instructions", "")),
             "expected_output": str(t.get("expected_output", "")),
             "assignee_id": assignee.id if assignee else None,
+            "reviewer_id": reviewer.id if reviewer else None,
             "priority": priority,
             "depends_on": [d for d in deps if isinstance(d, int)],
         })
@@ -297,7 +309,8 @@ def approve_plan(session: Session, plan: Plan) -> list[Task]:
             raise HTTPException(status.HTTP_409_CONFLICT, "計画の担当者がプロジェクトのメンバーから外れています。差し戻してください")
         task = Task(project_id=project.id, plan_id=plan.id, title=item["title"], instructions=item["instructions"],
                     expected_output=item["expected_output"], priority=item["priority"],
-                    assignee_id=item["assignee_id"], requested_by_agent_id=plan.agent_id,
+                    assignee_id=item["assignee_id"], reviewer_id=item.get("reviewer_id"),
+                    requested_by_agent_id=plan.agent_id,
                     depends_on=[created[d - 1].id for d in item["depends_on"]])
         place_task(session, task, "backlog")
         session.add(task)
@@ -382,3 +395,50 @@ def queue_reflection(session: Session, task: Task, outcome: str, comment: str) -
     parts += ["", "この仕事から、次の仕事に活かせる学びがあれば save_notes で業務メモに残してください。"]
     session.add(Run(kind="reflect", agent_id=task.assignee_id, project_id=task.project_id, task_id=task.id,
                     transcript=[{"role": "user", "content": [{"type": "text", "text": "\n".join(parts)}]}]))
+
+
+# ---- peer review by a reviewer agent ----
+
+MAX_PEER_ROUNDS = 2
+
+
+def send_to_review(session: Session, task: Task) -> None:
+    """After the assignee reports: the reviewer agent checks first, then the office head."""
+    reviewer = session.get(Agent, task.reviewer_id) if task.reviewer_id else None
+    if reviewer is None or not reviewer.active or reviewer.id == task.assignee_id:
+        task.review_stage = "manager"
+        return
+    if task.peer_rounds >= MAX_PEER_ROUNDS:
+        task.review_stage = "manager"
+        post(session, sender="system", kind="report", agent_id=reviewer.id, project_id=task.project_id,
+             task_id=task.id, body=f"「{task.title}」はレビューでの差し戻しが{MAX_PEER_ROUNDS}回に達したため、オフィス長の確認に回しました。")
+        return
+    task.review_stage = "peer"
+    session.add(Run(kind="review", agent_id=reviewer.id, project_id=task.project_id, task_id=task.id))
+    post(session, sender="system", kind="report", agent_id=task.assignee_id, project_id=task.project_id,
+         task_id=task.id, body=f"「{task.title}」の確認を、レビュー担当の{reviewer.name}さんに依頼しました。")
+
+
+def peer_approve(session: Session, task: Task, reviewer: Agent, comment: str) -> None:
+    task.review_stage = "manager"
+    post(session, sender="agent", kind="review", agent_id=reviewer.id, project_id=task.project_id,
+         task_id=task.id, body=f"「{task.title}」をレビューしました。問題ありません。\n\n{comment}")
+
+
+def peer_request_changes(session: Session, task: Task, reviewer: Agent, comment: str) -> None:
+    task.peer_rounds += 1
+    task.review_stage = None
+    post(session, sender="agent", kind="review", agent_id=reviewer.id, project_id=task.project_id,
+         task_id=task.id, body=f"「{task.title}」の修正をお願いしました。\n\n{comment}")
+    run = run_awaiting_review(session, task)
+    if run is not None:
+        _resume(run, f"レビュー担当の{reviewer.name}さんから修正の依頼がありました:\n{comment}\n"
+                     "指摘に対応し、必要なら成果物を提出し直してから、もう一度 finish で報告してください。")
+    place_task(session, task, "in_progress")
+
+
+def cancel_peer_review(session: Session, task: Task) -> None:
+    for run in session.scalars(select(Run).where(Run.task_id == task.id, Run.kind == "review",
+                                                 Run.status.in_(OPEN_RUN_STATUSES))):
+        run.status, run.ended_at, run.error = "cancelled", now(), "オフィス長がレビューを進めました"
+    task.review_stage = None

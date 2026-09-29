@@ -1323,3 +1323,10 @@ dialog.dialog[open] {
   border-color: var(--sidebar-active);
   background: #eef4ff;
 }
+.peer-review {
+  border-left: 3px solid #d9c8f5;
+  padding: 4px 0 4px 10px;
+  display: grid;
+  gap: 4px;
+}
+.msg-kind.kind-consult { background: #e7f5ee; color: var(--ok); }

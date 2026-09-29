@@ -75,6 +75,9 @@ export default function Kanban({ tasks, members, onOpen, onAdd, onMove }: Props)
                   onKeyDown={(e) => e.key === "Enter" && onOpen(t)}
                 >
                   <div className="task-title">{t.title}</div>
+                  {t.status === "review" && t.review_stage === "peer" && t.reviewer_id && (
+                    <span className="muted small">👀 {agentById.get(t.reviewer_id)?.name ?? "レビュー担当"}さんが確認中</span>
+                  )}
                   {t.status === "backlog" && t.depends_on.some((d) => tasks.find((x) => x.id === d)?.status !== "done") && (
                     <span className="muted small">⏳ 前のタスクの完了待ち</span>
                   )}

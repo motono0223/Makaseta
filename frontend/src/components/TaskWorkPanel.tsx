@@ -29,6 +29,10 @@ const STEP_LABEL: Record<string, string> = {
   submit_file: "ファイルを提出",
   ask_manager: "オフィス長に質問",
   finish: "完了を報告",
+  ask_colleague: "同僚に相談",
+  read_deliverables: "成果物を読む",
+  approve_work: "レビュー: 問題なし",
+  request_changes: "レビュー: 修正を依頼",
 };
 
 type Props = { task: Task; onChanged: () => void };
@@ -95,7 +99,16 @@ export default function TaskWorkPanel({ task, onChanged }: Props) {
       {task.status === "review" && (
         <div className="callout review">
           <div className="callout-title">成果物の確認をお願いします</div>
+          {task.review_stage === "peer" && (
+            <p className="small status ok">👀 レビュー担当の社員が確認中です。待たずにオフィス長が判断することもできます。</p>
+          )}
           {data.report && <Markdown>{data.report.body}</Markdown>}
+          {data.peer_review && task.review_stage !== "peer" && (
+            <div className="peer-review">
+              <div className="small"><strong>レビュー担当の所見</strong></div>
+              <Markdown>{data.peer_review.body}</Markdown>
+            </div>
+          )}
           {drafts.length === 0 && <p className="muted small">提出された成果物はありません（報告のみ）。</p>}
           {drafts.map((d) => (
             <details key={d.id} open>
@@ -162,7 +175,7 @@ export default function TaskWorkPanel({ task, onChanged }: Props) {
       {data.runs.map((run, index) => (
         <details key={run.id} className="run" open={index === 0}>
           <summary>
-            作業 #{run.id} · {RUN_STATUS[run.status]} · {run.steps}ステップ · ${Number(run.cost_usd).toFixed(4)}
+            {run.kind === "review" ? "レビュー" : "作業"} #{run.id} · {RUN_STATUS[run.status]} · {run.steps}ステップ · ${Number(run.cost_usd).toFixed(4)}
             <span className="muted small"> {formatDate(run.started_at ?? run.created_at)}</span>
           </summary>
           <ol className="run-log">

@@ -124,6 +124,8 @@ class TaskOut(BaseModel):
     requested_by_agent_id: int | None
     plan_id: int | None
     depends_on: list[int]
+    review_stage: str | None
+    peer_rounds: int
     rank: int
     created_at: datetime
     updated_at: datetime

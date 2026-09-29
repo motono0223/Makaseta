@@ -128,6 +128,7 @@ function PlanCard({ plan, busy, onAct }: { plan: Plan; busy: boolean; onAct: (a:
                   <strong>{item.title}</strong>
                   <span className="muted small">
                     {" "}→ {item.assignee_name ?? "（担当不明）"}
+                    {item.reviewer_name && `（レビュー: ${item.reviewer_name}）`}
                     {item.priority !== "normal" && ` · 優先度 ${PRIORITY[item.priority]}`}
                     {item.depends_on.length > 0 && ` · ${item.depends_on.map((d) => `${d}番`).join("・")}の後`}
                   </span>
