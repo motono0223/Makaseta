@@ -1,0 +1,49 @@
+# makaseta の起動構成
+#
+# アクセスするポートとバインド先は .env の MAKASETA_PORT / MAKASETA_BIND で変えられます。
+# 既定は 8081 です（8080 は VS Code Server などとぶつかりやすいため避けています）。
+# このファイルの ports を直接書き換えても構いません。
+#   例: "0.0.0.0:3000:8080"  -> LAN内の他のPCから http://<このPCのIP>:3000 でアクセス
+# コンテナ内のアプリは常に 8080 で待ち受けます（右側の 8080 は変えないでください）。
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        APP_UID: ${MAKASETA_UID:-1000}
+        APP_GID: ${MAKASETA_GID:-1000}
+    image: makaseta:local
+    ports:
+      - "${MAKASETA_BIND:-127.0.0.1}:${MAKASETA_PORT:-8081}:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-makaseta}:${POSTGRES_PASSWORD:-makaseta}@db:5432/${POSTGRES_DB:-makaseta}
+      DATA_DIR: /data
+      MODELS_CONFIG: /app/config/models.yaml
+      AWS_DIR: /home/app/.aws
+    volumes:
+      - ./data/files:/data/files
+      - ./config:/app/config:ro
+      - ${AWS_CONFIG_DIR:-~/.aws}:/home/app/.aws:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-makaseta}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-makaseta}
+      POSTGRES_DB: ${POSTGRES_DB:-makaseta}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped

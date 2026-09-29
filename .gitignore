@@ -1,0 +1,17 @@
+# secrets
+.env
+
+# persisted data (kept on the host, never committed)
+data/*
+!data/files/
+data/files/*
+!data/files/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# frontend
+node_modules/
+frontend/dist/

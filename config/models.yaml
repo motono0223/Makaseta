@@ -1,0 +1,38 @@
+# モデルプロファイル
+#
+# 社員はプロファイル名（claude-main など）で使うモデルを選びます。
+# model の値は、各サービスのコンソールやドキュメントで確認して書き換えてください。
+#   - Bedrock: モデルID または 推論プロファイルID（リージョンで使えるものを確認）
+#   - OpenAI / Gemini / DeepSeek: 各APIのモデル名
+# 認証情報（APIキーなど）はここには書かず、.env に書きます。
+
+profiles:
+  claude-main:
+    label: Claude（Bedrock）
+    provider: bedrock
+    model: REPLACE_WITH_BEDROCK_MODEL_ID
+    supports_tools: true
+
+  openai-main:
+    label: OpenAI
+    provider: openai
+    model: REPLACE_WITH_OPENAI_MODEL
+    supports_tools: true
+
+  gemini-main:
+    label: Gemini
+    provider: gemini
+    model: REPLACE_WITH_GEMINI_MODEL
+    supports_tools: true
+
+  deepseek-main:
+    label: DeepSeek
+    provider: deepseek
+    model: REPLACE_WITH_DEEPSEEK_MODEL
+    supports_tools: true
+
+  embed-main:
+    label: 埋め込み（Bedrock）
+    provider: bedrock
+    model: REPLACE_WITH_BEDROCK_EMBEDDING_MODEL_ID
+    kind: embedding

@@ -1,0 +1,30 @@
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    database_url: str = "postgresql+psycopg://makaseta:makaseta@localhost:5432/makaseta"
+    data_dir: Path = Path("./data")
+    static_dir: Path = Path("./static")
+    models_config: Path = Path("./config/models.yaml")
+
+    aws_dir: Path = Path.home() / ".aws"
+    aws_profile: str = "default"
+    aws_region: str = "us-east-1"
+    aws_access_key_id: str = ""
+
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
+    deepseek_api_key: str = ""
+
+    default_model_profile: str = "claude-main"
+    embedding_model_profile: str = "embed-main"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
