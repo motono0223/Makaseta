@@ -1,8 +1,10 @@
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path, PurePosixPath
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -63,6 +65,8 @@ class DeliverableOut(BaseModel):
     decided_at: datetime | None
     # Approving would replace a file that already exists in the room (the old one is kept as a version).
     overwrites: bool = False
+    # Binary deliverable (e.g. .pptx): download it instead of reading content.
+    file_size: int | None = None
 
 
 class MessageOut(BaseModel):
@@ -231,6 +235,14 @@ def cancel(task_id: int, session: SessionDep) -> dict[str, str]:
     work.place_task(session, task, "backlog")
     session.commit()
     return {"status": "cancelled"}
+
+
+@router.get("/deliverables/{deliverable_id}/download")
+def download_deliverable(deliverable_id: int, session: SessionDep) -> FileResponse:
+    d = session.get(Deliverable, deliverable_id)
+    if d is None or not d.file_path or not Path(d.file_path).is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "ファイルが見つかりません")
+    return FileResponse(d.file_path, filename=PurePosixPath(d.path).name)
 
 
 # ---- threads ----
@@ -413,6 +425,8 @@ def _wake(request: Request) -> None:
 
 def _deliverable_out(d: Deliverable) -> DeliverableOut:
     out = DeliverableOut.model_validate(d)
+    if d.file_path and Path(d.file_path).is_file():
+        out.file_size = Path(d.file_path).stat().st_size
     if d.status == "draft":
         try:
             out.overwrites = library.resolve(d.room, d.path).is_file()

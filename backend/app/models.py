@@ -43,6 +43,12 @@ class Skill(Base):
     instructions: Mapped[str] = mapped_column(Text, default="")
     tools: Mapped[list[str]] = mapped_column(JSON, default=list)
     builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    # builtin: shipped with makaseta, runs through app tools | package: an Agent Skills folder under ./skills
+    source: Mapped[str] = mapped_column(String(16), default="builtin")
+    folder: Mapped[str | None] = mapped_column(String(80), unique=True)
+    source_url: Mapped[str] = mapped_column(Text, default="")
+    # False when a package's folder has gone missing; agents keep the assignment but cannot use it.
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -284,6 +290,8 @@ class Deliverable(Base):
     room: Mapped[str] = mapped_column(String(80))
     path: Mapped[str] = mapped_column(Text)
     content: Mapped[str] = mapped_column(Text)
+    # A binary deliverable (e.g. .pptx) is kept here until approved; content is then empty.
+    file_path: Mapped[str | None] = mapped_column(Text)
     # draft | approved | rejected | superseded
     status: Mapped[str] = mapped_column(String(12), default="draft")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

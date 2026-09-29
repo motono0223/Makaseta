@@ -32,6 +32,8 @@ cp .env.example .env        # 必要に応じて編集
 docker compose up -d --build
 ```
 
+初回は、サンドボックス（LibreOffice などを含む）のビルドに数分かかります。
+
 ブラウザで http://localhost:8081 を開きます。
 
 > Bedrockを使わない場合も、ホストに `~/.aws` がないとDockerがroot所有の空フォルダを作ります。気になる場合は先に `mkdir -p ~/.aws` を実行するか、`.env` の `AWS_CONFIG_DIR` で別の場所を指定してください。
@@ -51,6 +53,26 @@ docker compose up -d --build
 7. **社員と話す**: 社員のアイコンをクリックするとスレッドが開きます。進捗を聞いたり、作業中の社員に追加の指示を出したりできます。
 
 作業ログ（社員が何を調べ、何を考えたか）と利用料金は、タスクの「作業」タブと設定画面で確認できます。
+
+## スキル（Agent Skills）
+
+社員には、[Agent Skills](https://github.com/anthropics/skills) 形式のスキル（`SKILL.md` とスクリプトのフォルダ）を付けられます。
+
+1. 画面の「スキル」で、GitHub のスキルのフォルダのURL（例: `https://github.com/anthropics/skills/tree/main/skills/pptx`）を入力し、「内容を確認」を押します。
+2. 手順書・ライセンス・スクリプトを確認してから「導入する」を押します（`./skills/<名前>` に保存されます）。ホストの `./skills` にフォルダを直接コピーしても追加できます。
+3. 社員名簿で、社員にスキルを付けます。
+
+社員はスキルの手順書を読み、スクリプトを **サンドボックス**（`sandbox` コンテナ）で実行して、.pptx などのファイルを成果物として提出します。
+
+サンドボックスの安全対策:
+
+- アプリとは別のコンテナで、一般ユーザーとして動きます。DBの接続情報やAPIキーは渡しません。
+- 触れられるのは、タスクごとの作業フォルダ（`./data/work`）と、読み取り専用のスキル（`./skills`）だけです。資料室のファイルは、社員がツールでコピーしたものだけが届きます。
+- 既定ではインターネットに接続できません（`.env` の `SANDBOX_OFFLINE=false` で接続可）。アプリのAPIも呼べません。
+- メモリ・CPU・プロセス数に上限があり（`SANDBOX_MEMORY` / `SANDBOX_CPUS`）、コマンドは時間切れで止まります。
+- Python（python-pptx・openpyxl・python-docx・pypdf・pandas・markitdown など）、uv、Node.js（pptxgenjs など）、LibreOffice、日本語フォントが入っています。
+
+公開されているスキルは任意のコードを含みます。信頼できる提供元のスキルだけを導入してください。
 
 ## ポートの変更
 
@@ -113,15 +135,18 @@ library/
 | --- | --- |
 | `./data/postgres` | データベース（社員、プロジェクト、タスク、会話など） |
 | `./library` | 資料室のファイル（`LIBRARY_DIR` で変更可） |
-| `./data/files` | 社員の作業用ファイル（今後使用） |
+| `./skills` | 導入したスキル |
+| `./data/work` | タスクごとの作業フォルダ（サンドボックスと共有） |
+| `./data/files` | 承認待ちのファイル成果物 |
 
-バックアップは、コンテナを止めてから `./data` と `./library` をコピーするだけです。
+バックアップは、コンテナを止めてから `./data`・`./library`・`./skills` をコピーするだけです。
 
 ## 開発
 
 ```
 backend/    FastAPI（Python 3.12）
 frontend/   React + TypeScript（Vite）
+sandbox/    スキルを実行するサンドボックス
 config/     モデルプロファイル
 ```
 

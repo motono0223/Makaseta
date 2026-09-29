@@ -132,12 +132,14 @@ export default function AgentForm({ initial, submitLabel, onSubmit, onCancel }: 
       <div className="field">
         <span className="label">スキル</span>
         <div className="skill-list">
-          {skills.map((s) => (
+          {skills.filter((s) => s.enabled || values.skill_ids.includes(s.id)).map((s) => (
             <label key={s.id} className="skill-option">
               <input type="checkbox" checked={values.skill_ids.includes(s.id)} onChange={() => toggleSkill(s.id)} />
               <span>
                 <strong>{s.name}</strong>
-                <span className="muted small"> {s.description}</span>
+                {s.source === "package" && <span className="chip package-chip">パッケージ</span>}
+                {!s.enabled && <span className="status bad small"> フォルダが見つかりません</span>}
+                <span className="muted small clamp-2"> {s.description}</span>
               </span>
             </label>
           ))}

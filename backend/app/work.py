@@ -4,6 +4,7 @@ Routers call these; the runner does the model calls. A task has at most one open
 waiting (on a question), or finished-and-awaiting-review (succeeded with a pending tool_use id).
 """
 
+import shutil
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -111,7 +112,10 @@ def approve(session: Session, task: Task) -> list[Deliverable]:
         target = library.resolve(d.room, d.path)
         target.parent.mkdir(parents=True, exist_ok=True)
         library.keep_old_version(d.room, target)
-        target.write_text(d.content, encoding="utf-8")
+        if d.file_path:
+            shutil.copyfile(d.file_path, target)
+        else:
+            target.write_text(d.content, encoding="utf-8")
         library.index_file(session, d.room, target, created_by_kind="agent", agent_id=d.agent_id,
                            task_id=task.id, force=True)
         d.status = "approved"

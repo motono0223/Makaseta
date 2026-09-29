@@ -15,6 +15,9 @@ class SkillOut(BaseModel):
     description: str
     tools: list[str]
     builtin: bool
+    source: str
+    folder: str | None
+    enabled: bool
 
 
 class AgentTemplateOut(BaseModel):

@@ -3,8 +3,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 
 from . import __version__
 from .catalog import seed_builtin_roles, seed_builtin_skills
@@ -12,7 +12,8 @@ from .config import get_settings
 from .db import check_database, run_migrations, session_factory
 from .library import Scanner
 from .llm_profiles import ModelProfile, load_profiles
-from .routers import agents, library, projects, work
+from . import sandbox, skill_packages
+from .routers import agents, library, projects, skills, work
 from .worker import Worker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     with session_factory()() as session:
         seed_builtin_skills(session)
         seed_builtin_roles(session)
+        skill_packages.scan(session)
     get_settings().library_root.mkdir(parents=True, exist_ok=True)
     app.state.scanner = Scanner(session_factory, get_settings().library_scan_interval)
     app.state.scanner.start()
@@ -35,10 +37,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="makaseta", version=__version__, lifespan=lifespan)
+
+
+@app.middleware("http")
+async def refuse_sandbox(request: Request, call_next):
+    # Scripts in the sandbox share a network with the app so the app can call them; they must never call back.
+    if request.client and request.client.host in sandbox.addresses():
+        return JSONResponse({"detail": "forbidden"}, status_code=403)
+    return await call_next(request)
 app.include_router(agents.router)
 app.include_router(library.router)
 app.include_router(projects.router)
 app.include_router(work.router)
+app.include_router(skills.router)
 
 
 @app.get("/api/health")
@@ -50,6 +61,7 @@ def health() -> dict:
         "version": __version__,
         "database": {"ok": db_ok, "detail": db_detail},
         "storage": {"ok": settings.library_root.is_dir(), "path": settings.library_host_path},
+        "sandbox": {"ok": sandbox.healthy()},
     }
 
 

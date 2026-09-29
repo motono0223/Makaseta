@@ -3,6 +3,7 @@ export type Health = {
   version: string;
   database: { ok: boolean; detail: string };
   storage: { ok: boolean; path: string };
+  sandbox: { ok: boolean };
 };
 
 export type ModelProfile = {
@@ -24,6 +25,32 @@ export type Skill = {
   description: string;
   tools: string[];
   builtin: boolean;
+  source: "builtin" | "package";
+  folder: string | null;
+  enabled: boolean;
+};
+
+export type SkillFile = { path: string; size: number; script: boolean };
+
+export type SkillDetail = Skill & {
+  instructions: string;
+  source_url: string;
+  agents: string[];
+  files: SkillFile[];
+  body: string;
+  license: string;
+  updated_at: string;
+};
+
+export type SkillPreview = {
+  stage_id: string;
+  name: string;
+  folder: string;
+  description: string;
+  license: string;
+  body: string;
+  files: SkillFile[];
+  exists: boolean;
 };
 
 export type AgentTemplate = {
@@ -206,6 +233,7 @@ export type Deliverable = {
   created_at: string;
   decided_at: string | null;
   overwrites: boolean;
+  file_size: number | null;
 };
 export type Message = {
   id: number;
@@ -305,6 +333,14 @@ export const api = {
   health: () => request<Health>("GET", "/api/health"),
   modelProfiles: () => request<ModelProfile[]>("GET", "/api/settings/models"),
   skills: () => request<Skill[]>("GET", "/api/skills"),
+  skillDetails: () => request<SkillDetail[]>("GET", "/api/skills/details"),
+  skillDetail: (id: number) => request<SkillDetail>("GET", `/api/skills/${id}/detail`),
+  rescanSkills: () => request<SkillDetail[]>("POST", "/api/skills/rescan"),
+  previewSkill: (url: string) => request<SkillPreview>("POST", "/api/skills/import/preview", { url }),
+  installSkill: (stageId: string, replace: boolean) =>
+    request<SkillDetail>("POST", "/api/skills/import/install", { stage_id: stageId, replace }),
+  discardSkill: (stageId: string) => request<void>("DELETE", `/api/skills/import/${stageId}`),
+  deleteSkill: (id: number) => request<void>("DELETE", `/api/skills/${id}`),
   agentTemplates: () => request<AgentTemplate[]>("GET", "/api/agent-templates"),
   agents: (includeRetired = false) =>
     request<Agent[]>("GET", `/api/agents${includeRetired ? "?include_retired=true" : ""}`),

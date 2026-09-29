@@ -5,6 +5,8 @@ Document text goes back wrapped in <document> tags and is treated as data, not i
 """
 
 import json
+import shutil
+import uuid
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
@@ -12,7 +14,12 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import library
+from . import sandbox
+from . import skill_packages as packages
+from .config import get_settings
 from .library import LibraryError
+from .sandbox import SandboxError
+from .skill_packages import SkillPackageError
 from .models import Agent, Deliverable, Document, Project, Task
 
 READ_CHUNK = 20_000
@@ -22,7 +29,9 @@ DELIVERABLE_SUFFIXES = {".md", ".txt", ".csv"}
 # Tools every agent has, regardless of skills, per kind of work.
 ALWAYS = {"task": ["ask_manager", "finish"], "plan": ["list_members", "ask_manager", "propose_plan"]}
 # Skill tools that make sense while planning (reading only; deliverables come from the tasks).
-PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document"}
+PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document", "read_skill", "read_skill_file"}
+MAX_WORKSPACE_WRITE = 1_000_000
+MAX_SUBMIT_BYTES = 100 * 1024 * 1024
 
 DEFINITIONS = {
     "search_documents": {
@@ -87,6 +96,92 @@ DEFINITIONS = {
             "required": ["question"],
         },
     },
+    "read_skill": {
+        "name": "read_skill",
+        "description": "スキルパッケージの手順書（SKILL.md）と、スキルに含まれるファイルの一覧を読む。"
+                       "スキルを使う作業の前に必ず読む。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"skill": {"type": "string", "description": "スキルのフォルダ名（システムプロンプトに記載）"}},
+            "required": ["skill"],
+        },
+    },
+    "read_skill_file": {
+        "name": "read_skill_file",
+        "description": "スキルパッケージに含まれるファイル（参考資料やスクリプトの中身）を読む。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "skill": {"type": "string"},
+                "path": {"type": "string", "description": "スキルのフォルダ内のパス（例: scripts/thumbnail.py）"},
+            },
+            "required": ["skill", "path"],
+        },
+    },
+    "run_command": {
+        "name": "run_command",
+        "description": "サンドボックスの作業フォルダで bash コマンドを実行する（スキルのスクリプト実行、ファイル変換など）。"
+                       "スキルのファイルは /skills/<フォルダ名>/ にある（読み取り専用）。python3・uv・node・LibreOffice(soffice)・"
+                       "zip が使える。インターネットには接続できないことがある。長く動くコマンドは timeout 秒で止まる。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "実行する bash コマンド"},
+                "timeout": {"type": "integer", "description": "秒（既定180、最大600）"},
+            },
+            "required": ["command"],
+        },
+    },
+    "list_workspace": {
+        "name": "list_workspace",
+        "description": "このタスクの作業フォルダにあるファイルを一覧する。",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    "read_workspace_file": {
+        "name": "read_workspace_file",
+        "description": f"作業フォルダのテキストファイルを読む（1回{READ_CHUNK}文字まで。続きは offset で）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "offset": {"type": "integer"}},
+            "required": ["path"],
+        },
+    },
+    "write_workspace_file": {
+        "name": "write_workspace_file",
+        "description": "作業フォルダにテキストファイル（スクリプトや下書きなど）を書く。既存のファイルは上書きする。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["path", "content"],
+        },
+    },
+    "copy_to_workspace": {
+        "name": "copy_to_workspace",
+        "description": "リンクされた資料室のファイルを、作業フォルダにコピーする（スクリプトで加工するときに使う）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "room": {"type": "string"},
+                "path": {"type": "string", "description": "資料室内のパス"},
+                "dest": {"type": "string", "description": "作業フォルダ内の保存先（省略時はファイル名のまま）"},
+            },
+            "required": ["room", "path"],
+        },
+    },
+    "submit_file": {
+        "name": "submit_file",
+        "description": "作業フォルダで作ったファイル（.pptx・.docx・.xlsx・.pdf・画像など）を成果物として提出する。"
+                       "読み書きできる資料室にだけ提出でき、オフィス長が承認すると資料室に保存される。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "作業フォルダ内のファイルのパス"},
+                "room": {"type": "string", "description": "保存先の資料室名"},
+                "dest_path": {"type": "string", "description": "資料室内の保存先パス（例: 報告/研修資料.pptx）"},
+            },
+            "required": ["path", "room", "dest_path"],
+        },
+    },
     "list_members": {
         "name": "list_members",
         "description": "このプロジェクトのメンバー（名前・ロール・役職・スキル・担当中のタスク数）を一覧する。"
@@ -141,7 +236,7 @@ DEFINITIONS = {
 
 def tools_for(agent: Agent, kind: str = "task") -> list[dict]:
     """Tool definitions for an agent's kind of work: skill tools plus the always-available ones, in a stable order."""
-    names = {t for s in agent.skills for t in s.tools}
+    names = {t for s in agent.skills if s.enabled for t in s.tools}
     if kind == "plan":
         names &= PLAN_SKILL_TOOLS
     names |= set(ALWAYS[kind])
@@ -154,13 +249,15 @@ class ToolContext:
     agent: Agent
     project: Project
     task: Task | None
+    workspace: str = ""
     allowed: set[str] = field(default_factory=set)
     rooms: dict[str, str] = field(default_factory=dict)  # room -> read | write
 
     @classmethod
     def build(cls, session: Session, agent: Agent, project: Project, task: Task | None,
-              kind: str = "task") -> "ToolContext":
+              kind: str = "task", plan_id: int | None = None) -> "ToolContext":
         return cls(session=session, agent=agent, project=project, task=task,
+                   workspace=sandbox.workspace_name(task.id if task else None, plan_id),
                    allowed={t["name"] for t in tools_for(agent, kind)},
                    rooms={r.room: r.access for r in project.rooms})
 
@@ -181,7 +278,7 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> str:
         raise ToolFailure(f"ツール「{name}」はありません")
     try:
         return handler(ctx, args)
-    except LibraryError as exc:
+    except (LibraryError, SkillPackageError, SandboxError) as exc:
         raise ToolFailure(str(exc)) from exc
     except (KeyError, TypeError, ValueError) as exc:
         raise ToolFailure(f"引数が正しくありません: {exc}") from exc
@@ -294,18 +391,132 @@ def _submit(ctx: ToolContext, args: dict) -> str:
     return f"成果物「{room}/{rel}」（{len(content)}字）を提出しました{note}。"
 
 
+def _own_package(ctx: ToolContext, folder: str) -> str:
+    owned = {s.folder for s in ctx.agent.skills if s.source == "package" and s.enabled}
+    if folder not in owned:
+        raise ToolFailure(f"スキル「{folder}」は付与されていません（付与済み: {'、'.join(sorted(owned)) or 'なし'}）")
+    return folder
+
+
+def _read_skill(ctx: ToolContext, args: dict) -> str:
+    folder = _own_package(ctx, str(args["skill"]))
+    base = packages.package_dir(folder)
+    meta = packages.parse_skill_md(base / "SKILL.md")
+    files = "\n".join(f"- {f['path']}（{f['size']} bytes）" for f in packages.list_files(base))
+    return (f"<skill name=\"{meta.name}\" folder=\"{folder}\">\n{meta.body}\n</skill>\n\n"
+            f"## スキルのファイル（パスはスキルのフォルダからの相対パス）\n{files}")
+
+
+def _read_skill_file(ctx: ToolContext, args: dict) -> str:
+    folder = _own_package(ctx, str(args["skill"]))
+    target = packages.resolve_file(folder, str(args["path"]))
+    if not target.is_file():
+        raise ToolFailure("ファイルが見つかりません。read_skill でファイル一覧を確認してください")
+    return f"<skill_file skill=\"{folder}\" path=\"{args['path']}\">\n{packages.read_text(target)}\n</skill_file>"
+
+
+def _run_command(ctx: ToolContext, args: dict) -> str:
+    timeout = args.get("timeout")
+    result = sandbox.run(ctx.workspace, str(args["command"]), int(timeout) if timeout else None)
+    parts = [f"終了コード: {result['exit_code']}（{result['seconds']}秒）"]
+    if result.get("timed_out"):
+        parts.append("⚠ 時間切れで止めました。処理を分けるか timeout を延ばしてください。")
+    if result.get("stdout"):
+        parts.append("--- stdout ---\n" + result["stdout"])
+    if result.get("stderr"):
+        parts.append("--- stderr ---\n" + result["stderr"])
+    return "\n".join(parts)
+
+
+def _list_workspace(ctx: ToolContext, args: dict) -> str:
+    base = sandbox.workspace_dir(ctx.workspace)
+    lines = []
+    for path in sorted(base.rglob("*")):
+        rel = path.relative_to(base)
+        if rel.parts[0] in {".home", "node_modules"} or not path.is_file():
+            continue
+        lines.append(f"- {rel.as_posix()}（{path.stat().st_size} bytes）")
+        if len(lines) >= 300:
+            lines.append("…（以下省略）")
+            break
+    return "\n".join(lines) if lines else "（作業フォルダは空です）"
+
+
+def _read_workspace_file(ctx: ToolContext, args: dict) -> str:
+    target = sandbox.resolve(ctx.workspace, str(args["path"]))
+    if not target.is_file():
+        raise ToolFailure("ファイルが見つかりません。list_workspace で確認してください")
+    text = packages.read_text(target) if target.stat().st_size < 5_000_000 else "（大きすぎるため表示できません）"
+    offset = max(int(args.get("offset") or 0), 0)
+    chunk = text[offset:offset + READ_CHUNK]
+    more = f"\n続きは offset={offset + len(chunk)} で読めます。" if offset + len(chunk) < len(text) else ""
+    return chunk + more
+
+
+def _write_workspace_file(ctx: ToolContext, args: dict) -> str:
+    content = str(args["content"])
+    if len(content) > MAX_WORKSPACE_WRITE:
+        raise ToolFailure("内容が大きすぎます（1MBまで）")
+    target = sandbox.resolve(ctx.workspace, str(args["path"]))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    return f"{args['path']} に書きました（{len(content)}字）。"
+
+
+def _copy_to_workspace(ctx: ToolContext, args: dict) -> str:
+    room = _room(ctx, args["room"])
+    source = library.resolve(room, args["path"])
+    if not source.is_file():
+        raise ToolFailure("資料室にそのファイルがありません")
+    dest = sandbox.resolve(ctx.workspace, str(args.get("dest") or source.name))
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, dest)
+    return f"{room}/{args['path']} を作業フォルダの {dest.relative_to(sandbox.workspace_dir(ctx.workspace).resolve()).as_posix()} にコピーしました。"
+
+
+def _submit_file(ctx: ToolContext, args: dict) -> str:
+    if ctx.task is None:
+        raise ToolFailure("成果物はタスクの作業中にだけ提出できます")
+    room = _room(ctx, args["room"], write=True)
+    source = sandbox.resolve(ctx.workspace, str(args["path"]))
+    if not source.is_file():
+        raise ToolFailure("作業フォルダにそのファイルがありません。list_workspace で確認してください")
+    if source.stat().st_size > MAX_SUBMIT_BYTES:
+        raise ToolFailure("ファイルが大きすぎます（100MBまで）")
+    rel = library.relative(room, library.resolve(room, args["dest_path"]))
+    kept = get_settings().data_dir / "files" / "deliverables" / f"task-{ctx.task.id}" / f"{uuid.uuid4().hex}{source.suffix}"
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, kept)
+    for old in ctx.session.scalars(select(Deliverable).where(
+            Deliverable.task_id == ctx.task.id, Deliverable.room == room, Deliverable.path == rel,
+            Deliverable.status == "draft")):
+        old.status = "superseded"
+    ctx.session.add(Deliverable(task_id=ctx.task.id, agent_id=ctx.agent.id, room=room, path=rel, content="",
+                                file_path=str(kept)))
+    ctx.session.flush()
+    return f"ファイル「{room}/{rel}」（{kept.stat().st_size} bytes）を成果物として提出しました。"
+
+
 _HANDLERS = {
     "search_documents": _search,
     "list_documents": _list,
     "read_document": _read,
     "submit_deliverable": _submit,
     "list_members": _members,
+    "read_skill": _read_skill,
+    "read_skill_file": _read_skill_file,
+    "run_command": _run_command,
+    "list_workspace": _list_workspace,
+    "read_workspace_file": _read_workspace_file,
+    "write_workspace_file": _write_workspace_file,
+    "copy_to_workspace": _copy_to_workspace,
+    "submit_file": _submit_file,
 }
 
 
 def describe_call(name: str, args: dict) -> str:
     """Short, human-readable line for the work log."""
-    if name == "submit_deliverable":
+    if name in ("submit_deliverable", "write_workspace_file"):
         return json.dumps({k: v for k, v in args.items() if k != "content"} | {"content": f"{len(args.get('content', ''))}字"},
                           ensure_ascii=False)
     return json.dumps(args, ensure_ascii=False)

@@ -25,15 +25,40 @@ services:
       MODELS_CONFIG: /app/config/models.yaml
       AWS_DIR: /home/app/.aws
       LIBRARY_ROOT: /library
+      SKILLS_ROOT: /skills
       LIBRARY_HOST_PATH: ${LIBRARY_DIR:-./library}
+      WORK_ROOT: /data/work
+      SANDBOX_URL: http://sandbox:8000
     volumes:
       - ./data/files:/data/files
+      - ./data/work:/data/work
       - ${LIBRARY_DIR:-./library}:/library
+      - ./skills:/skills
       - ./config:/app/config:ro
       - ${AWS_CONFIG_DIR:-~/.aws}:/home/app/.aws:ro
+    networks: [default, sandbox]
     depends_on:
       db:
         condition: service_healthy
+    restart: unless-stopped
+
+  # Runs skill scripts for agents. No database, no API keys; offline unless SANDBOX_OFFLINE=false.
+  sandbox:
+    build:
+      context: ./sandbox
+      args:
+        RUNNER_UID: ${MAKASETA_UID:-1000}
+        RUNNER_GID: ${MAKASETA_GID:-1000}
+    image: makaseta-sandbox:local
+    volumes:
+      - ./data/work:/work
+      - ./skills:/skills:ro
+    networks: [sandbox]
+    mem_limit: ${SANDBOX_MEMORY:-2g}
+    cpus: ${SANDBOX_CPUS:-2}
+    pids_limit: 512
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
 
   db:
@@ -50,3 +75,9 @@ services:
       timeout: 3s
       retries: 20
     restart: unless-stopped
+
+networks:
+  default: {}
+  sandbox:
+    # true: the sandbox cannot reach the internet (packages must be in the image). false: it can.
+    internal: ${SANDBOX_OFFLINE:-true}

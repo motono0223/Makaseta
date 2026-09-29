@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     library_root: Path = Path("./library")
     library_host_path: str = "./library"
     library_scan_interval: int = 30
+    skills_root: Path = Path("./skills")
+    work_root: Path = Path("./data/work")
+    sandbox_url: str = "http://localhost:8000"
+    sandbox_timeout: int = 180
+    github_token: str = ""
 
     aws_dir: Path = Path.home() / ".aws"
     aws_profile: str = "default"

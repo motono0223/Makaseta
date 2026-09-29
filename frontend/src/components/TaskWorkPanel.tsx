@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Run, Task, TaskWork, api } from "../api";
-import { formatDate } from "../format";
+import { formatDate, formatSize } from "../format";
 import { usePolling } from "../usePolling";
 import Markdown from "./Markdown";
 
@@ -19,6 +19,14 @@ const STEP_LABEL: Record<string, string> = {
   list_documents: "フォルダを確認",
   read_document: "文書を読む",
   submit_deliverable: "成果物を提出",
+  read_skill: "スキルの手順書を読む",
+  read_skill_file: "スキルのファイルを読む",
+  run_command: "コマンドを実行",
+  list_workspace: "作業フォルダを確認",
+  read_workspace_file: "作業ファイルを読む",
+  write_workspace_file: "作業ファイルを書く",
+  copy_to_workspace: "資料を作業フォルダへコピー",
+  submit_file: "ファイルを提出",
   ask_manager: "オフィス長に質問",
   finish: "完了を報告",
 };
@@ -99,7 +107,12 @@ export default function TaskWorkPanel({ task, onChanged }: Props) {
                   <span className="muted small">（承認すると資料室に保存されます）</span>
                 )}
               </summary>
-              {d.path.toLowerCase().endsWith(".md") ? (
+              {d.file_size !== null ? (
+                <p className="small">
+                  📎 ファイル（{formatSize(d.file_size)}）{" "}
+                  <a className="btn small-btn" href={`/api/deliverables/${d.id}/download`}>ダウンロードして確認</a>
+                </p>
+              ) : d.path.toLowerCase().endsWith(".md") ? (
                 <div className="file-content rendered"><Markdown>{d.content}</Markdown></div>
               ) : (
                 <pre className="file-content">{d.content}</pre>

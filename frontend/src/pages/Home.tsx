@@ -52,6 +52,9 @@ export default function Home() {
             <li className={health.storage.ok ? "status ok" : "status bad"}>
               資料室のフォルダ: {health.storage.ok ? "OK" : "見つかりません"}（{health.storage.path}）
             </li>
+            <li className={health.sandbox.ok ? "status ok" : "status bad"}>
+              サンドボックス（スキルの実行環境）: {health.sandbox.ok ? "OK" : "停止中（スキルのスクリプトは実行できません）"}
+            </li>
             <li className="muted">バージョン {health.version}</li>
           </ul>
         )}

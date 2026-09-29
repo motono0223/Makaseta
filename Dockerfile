@@ -13,8 +13,8 @@ ARG APP_GID=1000
 
 RUN groupadd -g "${APP_GID}" app \
     && useradd -m -u "${APP_UID}" -g app app \
-    && mkdir -p /data/files /library \
-    && chown -R app:app /data /library
+    && mkdir -p /data/files /library /skills \
+    && chown -R app:app /data /library /skills
 
 WORKDIR /app
 COPY backend/requirements.txt ./

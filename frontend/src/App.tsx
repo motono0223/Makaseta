@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { api } from "./api";
 import { ThreadProvider } from "./components/ThreadDrawer";
 import Inbox from "./pages/Inbox";
+import Skills from "./pages/Skills";
 import { usePolling } from "./usePolling";
 import Home from "./pages/Home";
 import Settings from "./pages/Settings";
@@ -21,6 +22,7 @@ const NAV = [
   { to: "/staff", label: "社員名簿" },
   { to: "/projects", label: "プロジェクト" },
   { to: "/library", label: "資料室" },
+  { to: "/skills", label: "スキル" },
   { to: "/inbox", label: "受信箱" },
   { to: "/settings", label: "設定" },
 ];
@@ -61,6 +63,7 @@ export default function App() {
             <Route path="/library" element={<Library />} />
             <Route path="/library/:room/*" element={<LibraryRoom />} />
             <Route path="/inbox" element={<Inbox />} />
+            <Route path="/skills" element={<Skills />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="*" element={<ComingSoon title="ページが見つかりません" what="" />} />
           </Routes>

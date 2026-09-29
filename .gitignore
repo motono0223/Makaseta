@@ -6,10 +6,17 @@ data/*
 !data/files/
 data/files/*
 !data/files/.gitkeep
+!data/work/
+data/work/*
+!data/work/.gitkeep
 
 # 資料室 contents live on the host, not in git
 library/*
 !library/.gitkeep
+
+# installed skill packages live on the host
+skills/*
+!skills/.gitkeep
 
 # python
 __pycache__/
