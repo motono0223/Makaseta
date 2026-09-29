@@ -49,6 +49,7 @@ class Worker:
                 post(session, sender="system", kind="report", agent_id=run.agent_id, project_id=run.project_id,
                      task_id=run.task_id, run_id=run.id,
                      body=f"タスク「{task.title}」の作業は、アプリの停止で中断しました。" if task
+                     else "計画づくりの途中でアプリが停止しました。" if run.kind == "plan"
                      else "返信の途中でアプリが停止しました。")
             session.execute(update(Agent).where(Agent.status == "working").values(status="idle"))
             session.commit()

@@ -7,6 +7,7 @@ Hidden files and folders (names starting with ".") are ignored and cannot be cre
 
 import logging
 import os
+import shutil
 import threading
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -66,6 +67,21 @@ def resolve(room: str, rel: str) -> Path:
 
 def relative(room: str, path: Path) -> str:
     return path.relative_to(room_dir(room)).as_posix()
+
+
+VERSIONS_DIR = ".makaseta/versions"
+
+
+def keep_old_version(room: str, target: Path) -> Path | None:
+    """Copy a file about to be overwritten into the room's hidden versions folder; returns the copy."""
+    if not target.is_file():
+        return None
+    rel = relative(room, target)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    copy = room_dir(room) / VERSIONS_DIR / rel / f"{stamp}{target.suffix}"
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target, copy)
+    return copy
 
 
 def list_room_names() -> list[str]:

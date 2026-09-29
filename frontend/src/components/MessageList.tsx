@@ -10,6 +10,8 @@ const KIND_LABEL: Partial<Record<Message["kind"], string>> = {
   review: "レビュー",
   instruction: "指示",
   answer: "回答",
+  request: "依頼",
+  plan: "計画",
 };
 
 type Props = { messages: Message[]; agents: Map<number, AgentBrief>; pending?: boolean };
@@ -38,6 +40,7 @@ export default function MessageList({ messages, agents, pending }: Props) {
               <div className="msg-meta">
                 {mine ? "オフィス長" : agent?.name ?? "社員"}
                 {KIND_LABEL[m.kind] && <span className={`msg-kind kind-${m.kind}`}>{KIND_LABEL[m.kind]}</span>}
+                {m.awaiting_answer && <span className="msg-kind kind-question">回答待ち</span>}
                 <span>{formatDate(m.created_at)}</span>
               </div>
               {mine ? <div className="pre-line">{m.body}</div> : <Markdown>{m.body}</Markdown>}

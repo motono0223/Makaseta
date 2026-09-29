@@ -1162,3 +1162,38 @@ button.member-chip {
   font-size: 14px;
   background: var(--surface);
 }
+
+/* ---- plans ---- */
+.thread-layout {
+  display: grid;
+  gap: 12px;
+}
+.thread-layout .card {
+  margin-bottom: 0;
+}
+.thread-card {
+  padding: 0;
+  overflow: hidden;
+}
+.plan-card {
+  display: grid;
+  gap: 10px;
+  border-color: #d9c8f5;
+}
+.plan-card textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.plan-items {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: 8px;
+}
+.inbox-badge-plan { background: #e6efff; color: #2559b8; }
+.msg-kind.kind-request { background: #e6efff; color: #2559b8; }
+.msg-kind.kind-plan { background: #e6efff; color: #2559b8; }

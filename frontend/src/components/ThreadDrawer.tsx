@@ -52,7 +52,7 @@ function ThreadDrawer({ agentId, onClose }: { agentId: number; onClose: () => vo
   );
   const openTasks = tasks.filter((t) => t.status !== "done");
   const doneTasks = tasks.filter((t) => t.status === "done");
-  const question = openTasks.find((t) => t.status === "waiting");
+  const question = [...messages].reverse().find((m) => m.awaiting_answer);
 
   async function send(e: { preventDefault: () => void }) {
     e.preventDefault();
@@ -60,7 +60,7 @@ function ThreadDrawer({ agentId, onClose }: { agentId: number; onClose: () => vo
     setSending(true);
     setError(null);
     try {
-      await api.messageAgent(agentId, text, question && asAnswer ? question.id : undefined);
+      await api.messageAgent(agentId, text, question?.run_id && asAnswer ? question.run_id : undefined);
       setText("");
       load();
     } catch (err) {
@@ -120,7 +120,7 @@ function ThreadDrawer({ agentId, onClose }: { agentId: number; onClose: () => vo
           {question && (
             <label className="toggle small">
               <input type="checkbox" checked={asAnswer} onChange={(e) => setAsAnswer(e.target.checked)} />
-              「{question.title}」の質問への回答として送る
+              いちばん新しい質問への回答として送る
             </label>
           )}
           <textarea

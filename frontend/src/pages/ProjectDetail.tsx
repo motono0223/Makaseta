@@ -137,7 +137,7 @@ export default function ProjectDetail() {
         <Kanban tasks={tasks} members={project.members} onOpen={setEditing} onAdd={() => setEditing("new")}
           onMove={moveTask} />
       )}
-      {tab === "thread" && <ProjectThread project={project} tasks={tasks} />}
+      {tab === "thread" && <ProjectThread project={project} tasks={tasks} onChanged={load} />}
       {tab === "settings" && (
         <ProjectSettings project={project} onSaved={setProject} onDeleted={() => navigate("/projects")} />
       )}

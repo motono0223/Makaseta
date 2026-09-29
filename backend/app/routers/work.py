@@ -7,11 +7,12 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import work
+from .. import library, work
 from ..config import get_settings
 from ..db import get_session
+from ..library import LibraryError
 from ..llm import month_spend
-from ..models import Agent, Deliverable, Message, Project, Run, RunStep, Task, UsageRecord
+from ..models import Agent, Deliverable, Message, Plan, Project, Run, RunStep, Task, UsageRecord
 
 router = APIRouter(prefix="/api", tags=["work"])
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -60,6 +61,8 @@ class DeliverableOut(BaseModel):
     status: str
     created_at: datetime
     decided_at: datetime | None
+    # Approving would replace a file that already exists in the room (the old one is kept as a version).
+    overwrites: bool = False
 
 
 class MessageOut(BaseModel):
@@ -74,6 +77,8 @@ class MessageOut(BaseModel):
     kind: str
     body: str
     created_at: datetime
+    # For questions: still waiting for the office head's answer.
+    awaiting_answer: bool = False
 
 
 class TaskWork(BaseModel):
@@ -89,12 +94,38 @@ class TextIn(BaseModel):
 
 class AgentMessageIn(BaseModel):
     body: Body
-    answer_task_id: int | None = None
+    answer_run_id: int | None = None
+
+
+class PlanItemOut(BaseModel):
+    title: str
+    instructions: str
+    expected_output: str
+    assignee_id: int | None
+    assignee_name: str | None
+    priority: str
+    depends_on: list[int]
+
+
+class PlanOut(BaseModel):
+    id: int
+    project_id: int
+    agent_id: int | None
+    request: str
+    status: str
+    summary: str
+    items: list[PlanItemOut]
+    run_status: str | None
+    run_error: str
+    task_ids: list[int]
+    created_at: datetime
+    decided_at: datetime | None
 
 
 class InboxItem(BaseModel):
-    kind: str  # question | review | failed
-    task_id: int
+    kind: str  # question | review | failed | plan
+    task_id: int | None
+    plan_id: int | None = None
     task_title: str
     project_id: int
     project_name: str
@@ -139,7 +170,8 @@ def task_work(task_id: int, session: SessionDep) -> TaskWork:
     if review is not None:
         report = session.scalar(select(Message).where(Message.run_id == review.id, Message.kind == "report",
                                                       Message.sender == "agent").order_by(Message.id.desc()))
-    return TaskWork(runs=run_out, deliverables=deliverables, question=question, report=report)
+    return TaskWork(runs=run_out, deliverables=[_deliverable_out(d) for d in deliverables], question=question,
+                    report=report)
 
 
 @router.post("/tasks/{task_id}/answer")
@@ -209,7 +241,7 @@ def agent_thread(agent_id: int, session: SessionDep, limit: int = 100) -> list[M
         raise HTTPException(status.HTTP_404_NOT_FOUND, "社員が見つかりません")
     rows = session.scalars(select(Message).where(Message.agent_id == agent_id).order_by(Message.id.desc())
                            .limit(min(limit, 500)))
-    return list(reversed(list(rows)))
+    return _with_open_questions(session, list(reversed(list(rows))))
 
 
 @router.post("/agents/{agent_id}/messages", status_code=status.HTTP_201_CREATED)
@@ -219,7 +251,7 @@ def message_agent(agent_id: int, body: AgentMessageIn, session: SessionDep, requ
         raise HTTPException(status.HTTP_404_NOT_FOUND, "社員が見つかりません")
     if not agent.active:
         raise HTTPException(status.HTTP_409_CONFLICT, f"{agent.name}さんは退職しています")
-    message = work.talk_to_agent(session, agent, body.body, body.answer_task_id)
+    message = work.talk_to_agent(session, agent, body.body, body.answer_run_id)
     session.commit()
     _wake(request)
     return message
@@ -229,7 +261,75 @@ def message_agent(agent_id: int, body: AgentMessageIn, session: SessionDep, requ
 def project_thread(project_id: int, session: SessionDep, limit: int = 200) -> list[MessageOut]:
     rows = session.scalars(select(Message).where(Message.project_id == project_id).order_by(Message.id.desc())
                            .limit(min(limit, 500)))
-    return list(reversed(list(rows)))
+    return _with_open_questions(session, list(reversed(list(rows))))
+
+
+@router.post("/runs/{run_id}/answer")
+def answer_run(run_id: int, body: TextIn, session: SessionDep, request: Request) -> MessageOut:
+    run = session.get(Run, run_id)
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "質問が見つかりません")
+    message = work.answer_run(session, run, body.body)
+    session.commit()
+    _wake(request)
+    return message
+
+
+# ---- manager plans ----
+
+@router.post("/projects/{project_id}/requests", status_code=status.HTTP_201_CREATED)
+def request_plan(project_id: int, body: TextIn, session: SessionDep, request: Request) -> PlanOut:
+    project = session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "プロジェクトが見つかりません")
+    plan = work.request_plan(session, project, body.body)
+    session.commit()
+    _wake(request)
+    return _plan_out(session, plan)
+
+
+@router.get("/projects/{project_id}/plans")
+def list_plans(project_id: int, session: SessionDep) -> list[PlanOut]:
+    plans = session.scalars(select(Plan).where(Plan.project_id == project_id).order_by(Plan.id.desc()))
+    return [_plan_out(session, p) for p in plans]
+
+
+@router.post("/plans/{plan_id}/approve")
+def approve_plan(plan_id: int, session: SessionDep, request: Request) -> PlanOut:
+    plan = _plan(session, plan_id)
+    work.approve_plan(session, plan)
+    session.commit()
+    _wake(request)
+    return _plan_out(session, plan)
+
+
+@router.post("/plans/{plan_id}/reject")
+def reject_plan(plan_id: int, body: TextIn, session: SessionDep, request: Request) -> PlanOut:
+    plan = _plan(session, plan_id)
+    work.reject_plan(session, plan, body.body)
+    session.commit()
+    _wake(request)
+    return _plan_out(session, plan)
+
+
+@router.post("/plans/{plan_id}/cancel")
+def cancel_plan(plan_id: int, session: SessionDep) -> PlanOut:
+    plan = _plan(session, plan_id)
+    work.cancel_plan(session, plan)
+    session.commit()
+    return _plan_out(session, plan)
+
+
+@router.post("/plans/{plan_id}/retry")
+def retry_plan(plan_id: int, session: SessionDep, request: Request) -> PlanOut:
+    plan = _plan(session, plan_id)
+    run = session.scalar(select(Run).where(Run.plan_id == plan.id).order_by(Run.id.desc()))
+    if plan.status != "drafting" or run is None or run.status not in ("failed", "interrupted"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "再実行できる計画づくりがありません")
+    run.status, run.error, run.ended_at = "queued", "", None
+    session.commit()
+    _wake(request)
+    return _plan_out(session, plan)
 
 
 # ---- inbox and usage ----
@@ -260,6 +360,22 @@ def inbox(session: SessionDep) -> list[InboxItem]:
             last = session.scalar(select(Run).where(Run.task_id == task.id).order_by(Run.id.desc()))
             if last is not None and last.status in ("failed", "interrupted"):
                 items.append(item("failed", task, last.error, last.ended_at or task.updated_at, last.agent_id))
+    for plan in session.scalars(select(Plan).where(Plan.status.in_(("drafting", "proposed")))):
+        run = session.scalar(select(Run).where(Run.plan_id == plan.id).order_by(Run.id.desc()))
+        base = dict(task_id=None, plan_id=plan.id, task_title=f"依頼: {work.short_title(plan.request)}",
+                    project_id=plan.project_id, project_name=projects.get(plan.project_id, ""),
+                    agent_id=plan.agent_id, agent_name=agents.get(plan.agent_id) if plan.agent_id else None)
+        if plan.status == "proposed":
+            items.append(InboxItem(kind="plan", body=plan.summary or "計画の確認をお願いします",
+                                   created_at=run.ended_at if run and run.ended_at else plan.created_at, **base))
+        elif run is not None and run.status == "waiting":
+            q = session.scalar(select(Message).where(Message.run_id == run.id, Message.kind == "question")
+                               .order_by(Message.id.desc()))
+            items.append(InboxItem(kind="question", body=q.body if q else "",
+                                   created_at=q.created_at if q else plan.created_at, **base))
+        elif run is not None and run.status in ("failed", "interrupted"):
+            items.append(InboxItem(kind="failed", body=run.error, created_at=run.ended_at or plan.created_at,
+                                   **base))
     return sorted(items, key=lambda i: i.created_at, reverse=True)
 
 
@@ -293,3 +409,44 @@ def _task(session: Session, task_id: int) -> Task:
 
 def _wake(request: Request) -> None:
     request.app.state.worker.wake()
+
+
+def _deliverable_out(d: Deliverable) -> DeliverableOut:
+    out = DeliverableOut.model_validate(d)
+    if d.status == "draft":
+        try:
+            out.overwrites = library.resolve(d.room, d.path).is_file()
+        except LibraryError:
+            pass
+    return out
+
+
+def _plan(session: Session, plan_id: int) -> Plan:
+    plan = session.get(Plan, plan_id)
+    if plan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "計画が見つかりません")
+    return plan
+
+
+def _plan_out(session: Session, plan: Plan) -> PlanOut:
+    names = {a.id: a.name for a in session.scalars(select(Agent))}
+    run = session.scalar(select(Run).where(Run.plan_id == plan.id).order_by(Run.id.desc()))
+    task_ids = session.scalars(select(Task.id).where(Task.plan_id == plan.id).order_by(Task.id)).all()
+    return PlanOut(
+        id=plan.id, project_id=plan.project_id, agent_id=plan.agent_id, request=plan.request, status=plan.status,
+        summary=plan.summary,
+        items=[PlanItemOut(**item, assignee_name=names.get(item.get("assignee_id"))) for item in plan.items],
+        run_status=run.status if run else None, run_error=run.error if run else "", task_ids=list(task_ids),
+        created_at=plan.created_at, decided_at=plan.decided_at,
+    )
+
+
+def _with_open_questions(session: Session, messages: list[Message]) -> list[MessageOut]:
+    run_ids = {m.run_id for m in messages if m.kind == "question" and m.run_id}
+    waiting = set(session.scalars(select(Run.id).where(Run.id.in_(run_ids), Run.status == "waiting"))) if run_ids else set()
+    latest: dict[int, int] = {}
+    for m in messages:
+        if m.kind == "question" and m.run_id in waiting:
+            latest[m.run_id] = m.id
+    return [MessageOut.model_validate(m).model_copy(update={"awaiting_answer": latest.get(m.run_id) == m.id})
+            for m in messages]

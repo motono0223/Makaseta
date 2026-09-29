@@ -181,6 +181,9 @@ class Task(Base):
     # None = requested by the office head
     requested_by_agent_id: Mapped[int | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"))
     rank: Mapped[int] = mapped_column(Integer, default=0)
+    # Set when the task came from a manager's plan; depends_on lists task ids that must be done first.
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id", ondelete="SET NULL"))
+    depends_on: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -188,17 +191,36 @@ class Task(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Plan(Base):
+    """A manager's breakdown of the office head's request into tasks, approved before it starts."""
+
+    __tablename__ = "plans"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    agent_id: Mapped[int | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"))
+    request: Mapped[str] = mapped_column(Text)
+    # drafting | proposed | approved | cancelled
+    status: Mapped[str] = mapped_column(String(12), default="drafting")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    # [{title, instructions, expected_output, assignee_id, reviewer_id, priority, depends_on: [index]}]
+    items: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Run(Base):
-    """One piece of an agent's work: a task run (tool loop) or a reply in the agent's thread."""
+    """One piece of an agent's work: a task run, a planning run, or a reply in the agent's thread."""
 
     __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # task | chat
+    # task | plan | chat
     kind: Mapped[str] = mapped_column(String(8), default="task")
     agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
     task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id", ondelete="CASCADE"))
     # queued | running | waiting | succeeded | failed | cancelled | interrupted
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     # Messages API conversation, stored so a paused run can resume later.

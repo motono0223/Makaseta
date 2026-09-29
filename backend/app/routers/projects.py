@@ -122,6 +122,8 @@ class TaskOut(BaseModel):
     assignee_id: int | None
     reviewer_id: int | None
     requested_by_agent_id: int | None
+    plan_id: int | None
+    depends_on: list[int]
     rank: int
     created_at: datetime
     updated_at: datetime

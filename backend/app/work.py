@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from . import library
-from .models import Agent, Deliverable, Message, Run, Task
+from .models import Agent, Deliverable, Message, Plan, Project, Run, Task
 
 OPEN_RUN_STATUSES = ("queued", "running", "waiting")
 # pending_tool_use_id when a run ended with plain text instead of a tool call: resume with a text message.
@@ -87,12 +87,20 @@ def cancel_task(session: Session, task: Task, reason: str) -> None:
 
 def answer_question(session: Session, task: Task, body: str) -> Message:
     run = open_run(session, task)
-    if run is None or run.status != "waiting" or run.pending_tool_use_id is None:
+    if run is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "このタスクには回答待ちの質問がありません")
-    message = post(session, sender="manager", kind="answer", agent_id=run.agent_id, project_id=task.project_id,
-                   task_id=task.id, run_id=run.id, body=body)
+    return answer_run(session, run, body)
+
+
+def answer_run(session: Session, run: Run, body: str) -> Message:
+    """Answer the question a paused run (task or planning) is waiting on."""
+    if run.status != "waiting" or run.pending_tool_use_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "回答待ちの質問がありません")
+    message = post(session, sender="manager", kind="answer", agent_id=run.agent_id, project_id=run.project_id,
+                   task_id=run.task_id, run_id=run.id, body=body)
     _resume(run, f"オフィス長の回答: {body}")
-    place_task(session, task, "in_progress")
+    if run.task_id is not None:
+        place_task(session, session.get(Task, run.task_id), "in_progress")
     return message
 
 
@@ -102,6 +110,7 @@ def approve(session: Session, task: Task) -> list[Deliverable]:
     for d in drafts:
         target = library.resolve(d.room, d.path)
         target.parent.mkdir(parents=True, exist_ok=True)
+        library.keep_old_version(d.room, target)
         target.write_text(d.content, encoding="utf-8")
         library.index_file(session, d.room, target, created_by_kind="agent", agent_id=d.agent_id,
                            task_id=task.id, force=True)
@@ -113,6 +122,7 @@ def approve(session: Session, task: Task) -> list[Deliverable]:
         review.pending_results = []
     if task.status != "done":
         place_task(session, task, "done")
+    start_ready_dependents(session, task)
     if task.assignee_id:
         saved = "、".join(f"{d.room}/{d.path}" for d in drafts)
         post(session, sender="manager", kind="review", agent_id=task.assignee_id, project_id=task.project_id,
@@ -153,13 +163,13 @@ def _resume(run: Run, reply: str) -> None:
     run.error = ""
 
 
-def talk_to_agent(session: Session, agent: Agent, body: str, answer_task_id: int | None = None) -> Message:
+def talk_to_agent(session: Session, agent: Agent, body: str, answer_run_id: int | None = None) -> Message:
     """The office head writes in an agent's thread."""
-    if answer_task_id is not None:
-        task = session.get(Task, answer_task_id)
-        if task is None or task.assignee_id != agent.id:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "回答先のタスクが見つかりません")
-        return answer_question(session, task, body)
+    if answer_run_id is not None:
+        run = session.get(Run, answer_run_id)
+        if run is None or run.agent_id != agent.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "回答先の質問が見つかりません")
+        return answer_run(session, run, body)
 
     running = session.scalar(select(Run).where(Run.agent_id == agent.id, Run.kind == "task",
                                                Run.status.in_(("queued", "running"))).order_by(Run.id))
@@ -184,3 +194,147 @@ def on_status_change(session: Session, task: Task, old: str, new: str) -> None:
         approve(session, task)
     elif old in ("in_progress", "waiting") and new in ("backlog", "review"):
         cancel_task(session, task, "オフィス長がカードを移動しました")
+
+
+# ---- dependencies ----
+
+def ready(session: Session, task: Task) -> bool:
+    """True when every task this one depends on is done."""
+    if not task.depends_on:
+        return True
+    done = session.scalars(select(Task.id).where(Task.id.in_(task.depends_on), Task.status == "done")).all()
+    return len(done) == len(set(task.depends_on))
+
+
+def start_ready_dependents(session: Session, finished: Task) -> None:
+    session.flush()
+    for task in session.scalars(select(Task).where(Task.project_id == finished.project_id,
+                                                   Task.status == "backlog", Task.assignee_id.is_not(None))):
+        if finished.id in (task.depends_on or []) and ready(session, task):
+            place_task(session, task, "in_progress")
+            start_task(session, task)
+
+
+# ---- manager plans ----
+
+MAX_PLAN_TASKS = 8
+
+
+def primary_manager(project: Project) -> Agent | None:
+    member = next((m for m in project.members if m.is_primary and m.agent.active), None)
+    member = member or next((m for m in project.members if m.role.is_manager and m.agent.active), None)
+    return member.agent if member else None
+
+
+def request_plan(session: Session, project: Project, body: str) -> Plan:
+    """The office head asks the project's contact manager to plan the work."""
+    manager = primary_manager(project)
+    if manager is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "このプロジェクトには依頼を受けられるマネージャーがいません")
+    plan = Plan(project_id=project.id, agent_id=manager.id, request=body)
+    session.add(plan)
+    session.flush()
+    post(session, sender="manager", kind="request", agent_id=manager.id, project_id=project.id, body=body)
+    session.add(Run(kind="plan", agent_id=manager.id, project_id=project.id, plan_id=plan.id))
+    return plan
+
+
+def validate_plan(project: Project, args: dict) -> tuple[list[dict], list[str]]:
+    """Turn propose_plan input into plan items, or explain what is wrong so the manager can fix it."""
+    members = {m.agent.name: m.agent for m in project.members if m.agent.active}
+    tasks = args.get("tasks") or []
+    errors = []
+    if not tasks:
+        errors.append("tasks が空です")
+    if len(tasks) > MAX_PLAN_TASKS:
+        errors.append(f"タスクは{MAX_PLAN_TASKS}件以内にしてください")
+    items = []
+    for number, t in enumerate(tasks, start=1):
+        title = str(t.get("title", "")).strip()
+        assignee = members.get(str(t.get("assignee", "")).strip())
+        deps = t.get("depends_on") or []
+        if not title:
+            errors.append(f"{number}番目: title が空です")
+        if assignee is None:
+            errors.append(f"{number}番目: 担当「{t.get('assignee')}」はメンバーにいません（{', '.join(members)}）")
+        if any(not isinstance(d, int) or d < 1 or d >= number for d in deps):
+            errors.append(f"{number}番目: depends_on には、それより前のタスクの番号だけを書けます")
+        priority = t.get("priority") if t.get("priority") in ("high", "normal", "low") else "normal"
+        items.append({
+            "title": title[:200],
+            "instructions": str(t.get("instructions", "")),
+            "expected_output": str(t.get("expected_output", "")),
+            "assignee_id": assignee.id if assignee else None,
+            "priority": priority,
+            "depends_on": [d for d in deps if isinstance(d, int)],
+        })
+    return items, errors
+
+
+def approve_plan(session: Session, plan: Plan) -> list[Task]:
+    if plan.status != "proposed":
+        raise HTTPException(status.HTTP_409_CONFLICT, "承認できるのは提案中の計画だけです")
+    project = session.get(Project, plan.project_id)
+    members = {m.agent_id for m in project.members}
+    created: list[Task] = []
+    for item in plan.items:
+        if item["assignee_id"] not in members:
+            raise HTTPException(status.HTTP_409_CONFLICT, "計画の担当者がプロジェクトのメンバーから外れています。差し戻してください")
+        task = Task(project_id=project.id, plan_id=plan.id, title=item["title"], instructions=item["instructions"],
+                    expected_output=item["expected_output"], priority=item["priority"],
+                    assignee_id=item["assignee_id"], requested_by_agent_id=plan.agent_id,
+                    depends_on=[created[d - 1].id for d in item["depends_on"]])
+        place_task(session, task, "backlog")
+        session.add(task)
+        session.flush()
+        created.append(task)
+    if plan.agent_id in members:
+        wrap_up = Task(project_id=project.id, plan_id=plan.id, title=f"取りまとめ: {short_title(plan.request)}",
+                       instructions="計画した各タスクの報告と成果物を確認し、オフィス長の依頼に対する最終報告をまとめてください。"
+                                    f"\n\n依頼内容:\n{plan.request}",
+                       expected_output="依頼への最終報告（必要なら成果物）", assignee_id=plan.agent_id,
+                       requested_by_agent_id=plan.agent_id, depends_on=[t.id for t in created])
+        place_task(session, wrap_up, "backlog")
+        session.add(wrap_up)
+        session.flush()
+        created.append(wrap_up)
+    plan.status = "approved"
+    plan.decided_at = now()
+    run = session.scalar(select(Run).where(Run.plan_id == plan.id).order_by(Run.id.desc()))
+    if run is not None:
+        run.pending_tool_use_id = None
+        run.pending_results = []
+    post(session, sender="manager", kind="review", agent_id=plan.agent_id, project_id=project.id,
+         body=f"計画を承認しました（タスク{len(created)}件）。")
+    for task in created:
+        if not task.depends_on:
+            place_task(session, task, "in_progress")
+            start_task(session, task)
+    return created
+
+
+def reject_plan(session: Session, plan: Plan, comment: str) -> Run:
+    run = session.scalar(select(Run).where(Run.plan_id == plan.id).order_by(Run.id.desc()))
+    if plan.status != "proposed" or run is None or run.pending_tool_use_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "差し戻せる計画がありません")
+    post(session, sender="manager", kind="review", agent_id=plan.agent_id, project_id=plan.project_id,
+         run_id=run.id, body=f"計画を差し戻しました。{comment}")
+    plan.status = "drafting"
+    _resume(run, f"オフィス長が計画を差し戻しました。コメント: {comment}\n指摘を踏まえて、もう一度 propose_plan で提案してください。")
+    return run
+
+
+def cancel_plan(session: Session, plan: Plan) -> None:
+    if plan.status not in ("drafting", "proposed"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "取り消せるのは作成中か提案中の計画だけです")
+    for run in session.scalars(select(Run).where(Run.plan_id == plan.id, Run.status.in_(OPEN_RUN_STATUSES))):
+        run.status, run.ended_at, run.error = "cancelled", now(), "オフィス長が依頼を取り消しました"
+    plan.status = "cancelled"
+    plan.decided_at = now()
+    post(session, sender="manager", kind="review", agent_id=plan.agent_id, project_id=plan.project_id,
+         body="依頼を取り消しました。")
+
+
+def short_title(text: str, limit: int = 30) -> str:
+    first = text.strip().splitlines()[0] if text.strip() else ""
+    return first if len(first) <= limit else first[:limit] + "…"

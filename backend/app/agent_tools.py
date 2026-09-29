@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from . import library
@@ -19,8 +19,10 @@ READ_CHUNK = 20_000
 SEARCH_LIMIT = 10
 DELIVERABLE_SUFFIXES = {".md", ".txt", ".csv"}
 
-# Tools every agent has, regardless of skills.
-ALWAYS = ["ask_manager", "finish"]
+# Tools every agent has, regardless of skills, per kind of work.
+ALWAYS = {"task": ["ask_manager", "finish"], "plan": ["list_members", "ask_manager", "propose_plan"]}
+# Skill tools that make sense while planning (reading only; deliverables come from the tasks).
+PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document"}
 
 DEFINITIONS = {
     "search_documents": {
@@ -85,6 +87,44 @@ DEFINITIONS = {
             "required": ["question"],
         },
     },
+    "list_members": {
+        "name": "list_members",
+        "description": "このプロジェクトのメンバー（名前・ロール・役職・スキル・担当中のタスク数）を一覧する。"
+                       "タスクの担当を決める前に使う。",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    "propose_plan": {
+        "name": "propose_plan",
+        "description": "オフィス長の依頼をタスクに分けた計画を提案する。オフィス長が承認すると、タスクが作られて担当者に"
+                       "割り振られ、前工程のないタスクから作業が始まる。最後の取りまとめタスクはあなたに自動で追加される。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string", "description": "計画の概要と進め方（オフィス長向け、数行）"},
+                "tasks": {
+                    "type": "array",
+                    "description": "実行する順に並べたタスク（1〜8件）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "instructions": {"type": "string", "description": "担当者への具体的な指示"},
+                            "expected_output": {"type": "string", "description": "期待する成果物"},
+                            "assignee": {"type": "string", "description": "担当するメンバーの名前"},
+                            "priority": {"type": "string", "enum": ["high", "normal", "low"]},
+                            "depends_on": {
+                                "type": "array",
+                                "items": {"type": "integer"},
+                                "description": "先に終わっている必要があるタスクの番号（このリストの1始まりの番号。前にあるものだけ）",
+                            },
+                        },
+                        "required": ["title", "instructions", "assignee"],
+                    },
+                },
+            },
+            "required": ["summary", "tasks"],
+        },
+    },
     "finish": {
         "name": "finish",
         "description": "タスクの作業を終え、オフィス長に報告する。報告後はレビュー待ちになる。",
@@ -99,9 +139,12 @@ DEFINITIONS = {
 }
 
 
-def tools_for(agent: Agent) -> list[dict]:
-    """Tool definitions for an agent: its skills' tools plus the always-available ones, in a stable order."""
-    names = {t for s in agent.skills for t in s.tools} | set(ALWAYS)
+def tools_for(agent: Agent, kind: str = "task") -> list[dict]:
+    """Tool definitions for an agent's kind of work: skill tools plus the always-available ones, in a stable order."""
+    names = {t for s in agent.skills for t in s.tools}
+    if kind == "plan":
+        names &= PLAN_SKILL_TOOLS
+    names |= set(ALWAYS[kind])
     return [DEFINITIONS[n] for n in DEFINITIONS if n in names]
 
 
@@ -110,14 +153,15 @@ class ToolContext:
     session: Session
     agent: Agent
     project: Project
-    task: Task
+    task: Task | None
     allowed: set[str] = field(default_factory=set)
     rooms: dict[str, str] = field(default_factory=dict)  # room -> read | write
 
     @classmethod
-    def build(cls, session: Session, agent: Agent, project: Project, task: Task) -> "ToolContext":
+    def build(cls, session: Session, agent: Agent, project: Project, task: Task | None,
+              kind: str = "task") -> "ToolContext":
         return cls(session=session, agent=agent, project=project, task=task,
-                   allowed={t["name"] for t in tools_for(agent)},
+                   allowed={t["name"] for t in tools_for(agent, kind)},
                    rooms={r.room: r.access for r in project.rooms})
 
 
@@ -126,7 +170,7 @@ class ToolFailure(Exception):
 
 
 # Control-flow tools: the runner handles them itself.
-PAUSING = {"ask_manager", "finish"}
+PAUSING = {"ask_manager", "finish", "propose_plan"}
 
 
 def run_tool(ctx: ToolContext, name: str, args: dict) -> str:
@@ -217,7 +261,23 @@ def _read(ctx: ToolContext, args: dict) -> str:
             f"{chunk}\n</document>\n{more}")
 
 
+def _members(ctx: ToolContext, args: dict) -> str:
+    lines = []
+    for m in ctx.project.members:
+        if not m.agent.active:
+            continue
+        open_tasks = ctx.session.scalar(select(func.count()).select_from(Task).where(
+            Task.assignee_id == m.agent_id, Task.status.in_(("backlog", "in_progress", "waiting", "review"))))
+        skills = "、".join(s.name for s in m.agent.skills) or "なし"
+        me = "（あなた）" if m.agent_id == ctx.agent.id else ""
+        lines.append(f"- {m.agent.name}{me}: ロール {m.role.name} / 役職 {m.agent.title or 'なし'} / "
+                     f"スキル {skills} / 担当中のタスク {open_tasks}件")
+    return "\n".join(lines) or "メンバーがいません。"
+
+
 def _submit(ctx: ToolContext, args: dict) -> str:
+    if ctx.task is None:
+        raise ToolFailure("成果物はタスクの作業中にだけ提出できます")
     room = _room(ctx, args["room"], write=True)
     rel = library.relative(room, library.resolve(room, args["path"]))
     if PurePosixPath(rel).suffix.lower() not in DELIVERABLE_SUFFIXES:
@@ -239,6 +299,7 @@ _HANDLERS = {
     "list_documents": _list,
     "read_document": _read,
     "submit_deliverable": _submit,
+    "list_members": _members,
 }
 
 

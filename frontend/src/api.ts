@@ -151,6 +151,8 @@ export type Task = {
   assignee_id: number | null;
   reviewer_id: number | null;
   requested_by_agent_id: number | null;
+  plan_id: number | null;
+  depends_on: number[];
   rank: number;
   created_at: string;
   updated_at: string;
@@ -203,6 +205,7 @@ export type Deliverable = {
   status: "draft" | "approved" | "rejected" | "superseded";
   created_at: string;
   decided_at: string | null;
+  overwrites: boolean;
 };
 export type Message = {
   id: number;
@@ -211,14 +214,41 @@ export type Message = {
   task_id: number | null;
   run_id: number | null;
   sender: "manager" | "agent" | "system";
-  kind: "chat" | "report" | "question" | "answer" | "instruction" | "review";
+  kind: "chat" | "report" | "question" | "answer" | "instruction" | "review" | "request" | "plan";
   body: string;
   created_at: string;
+  awaiting_answer: boolean;
+};
+
+export type PlanItem = {
+  title: string;
+  instructions: string;
+  expected_output: string;
+  assignee_id: number | null;
+  assignee_name: string | null;
+  priority: Priority;
+  depends_on: number[];
+};
+
+export type Plan = {
+  id: number;
+  project_id: number;
+  agent_id: number | null;
+  request: string;
+  status: "drafting" | "proposed" | "approved" | "cancelled";
+  summary: string;
+  items: PlanItem[];
+  run_status: Run["status"] | null;
+  run_error: string;
+  task_ids: number[];
+  created_at: string;
+  decided_at: string | null;
 };
 export type TaskWork = { runs: Run[]; deliverables: Deliverable[]; question: Message | null; report: Message | null };
 export type InboxItem = {
-  kind: "question" | "review" | "failed";
-  task_id: number;
+  kind: "question" | "review" | "failed" | "plan";
+  task_id: number | null;
+  plan_id: number | null;
   task_title: string;
   project_id: number;
   project_name: string;
@@ -335,8 +365,16 @@ export const api = {
   retryTask: (taskId: number) => request<Run>("POST", `/api/tasks/${taskId}/retry`),
   cancelTask: (taskId: number) => request<unknown>("POST", `/api/tasks/${taskId}/cancel`),
   agentThread: (agentId: number) => request<Message[]>("GET", `/api/agents/${agentId}/thread`),
-  messageAgent: (agentId: number, body: string, answerTaskId?: number) =>
-    request<Message>("POST", `/api/agents/${agentId}/messages`, { body, answer_task_id: answerTaskId ?? null }),
+  messageAgent: (agentId: number, body: string, answerRunId?: number) =>
+    request<Message>("POST", `/api/agents/${agentId}/messages`, { body, answer_run_id: answerRunId ?? null }),
+  answerRun: (runId: number, body: string) => request<Message>("POST", `/api/runs/${runId}/answer`, { body }),
+  requestToManager: (projectId: number, body: string) =>
+    request<Plan>("POST", `/api/projects/${projectId}/requests`, { body }),
+  plans: (projectId: number) => request<Plan[]>("GET", `/api/projects/${projectId}/plans`),
+  approvePlan: (planId: number) => request<Plan>("POST", `/api/plans/${planId}/approve`),
+  rejectPlan: (planId: number, body: string) => request<Plan>("POST", `/api/plans/${planId}/reject`, { body }),
+  cancelPlan: (planId: number) => request<Plan>("POST", `/api/plans/${planId}/cancel`),
+  retryPlan: (planId: number) => request<Plan>("POST", `/api/plans/${planId}/retry`),
   projectThread: (projectId: number) => request<Message[]>("GET", `/api/projects/${projectId}/thread`),
   inbox: () => request<InboxItem[]>("GET", "/api/inbox"),
   usage: () => request<UsageSummary>("GET", "/api/usage/summary"),

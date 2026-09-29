@@ -92,7 +92,12 @@ export default function TaskWorkPanel({ task, onChanged }: Props) {
           {drafts.map((d) => (
             <details key={d.id} open>
               <summary>
-                📄 {d.room} / {d.path} <span className="muted small">（承認すると資料室に保存されます）</span>
+                📄 {d.room} / {d.path}{" "}
+                {d.overwrites ? (
+                  <span className="status bad small">⚠ 既存のファイルを上書きします（旧版は資料室の .makaseta/versions に残ります）</span>
+                ) : (
+                  <span className="muted small">（承認すると資料室に保存されます）</span>
+                )}
               </summary>
               {d.path.toLowerCase().endsWith(".md") ? (
                 <div className="file-content rendered"><Markdown>{d.content}</Markdown></div>

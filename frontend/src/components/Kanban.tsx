@@ -75,6 +75,9 @@ export default function Kanban({ tasks, members, onOpen, onAdd, onMove }: Props)
                   onKeyDown={(e) => e.key === "Enter" && onOpen(t)}
                 >
                   <div className="task-title">{t.title}</div>
+                  {t.status === "backlog" && t.depends_on.some((d) => tasks.find((x) => x.id === d)?.status !== "done") && (
+                    <span className="muted small">⏳ 前のタスクの完了待ち</span>
+                  )}
                   <div className="task-meta">
                     {t.priority !== "normal" && <span className={`chip priority-${t.priority}`}>優先度 {PRIORITY[t.priority]}</span>}
                     {t.due_date && <span className="muted small">期限 {t.due_date}</span>}

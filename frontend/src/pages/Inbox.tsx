@@ -9,6 +9,7 @@ const KIND: Record<InboxItem["kind"], { label: string; action: string }> = {
   question: { label: "質問", action: "回答する" },
   review: { label: "レビュー待ち", action: "確認する" },
   failed: { label: "エラー", action: "対応する" },
+  plan: { label: "計画の提案", action: "計画を確認する" },
 };
 
 export default function Inbox() {
@@ -32,7 +33,7 @@ export default function Inbox() {
       )}
       <div className="inbox">
         {items?.map((item) => (
-          <section key={`${item.kind}-${item.task_id}`} className={`card inbox-item inbox-${item.kind}`}>
+          <section key={`${item.kind}-${item.task_id ?? `p${item.plan_id}`}`} className={`card inbox-item inbox-${item.kind}`}>
             <div className="inbox-head">
               <span className={`badge inbox-badge-${item.kind}`}>{KIND[item.kind].label}</span>
               <strong className="grow">{item.task_title}</strong>
@@ -50,7 +51,8 @@ export default function Inbox() {
               )}
             </div>
             {item.body && <p className="pre-line clamp">{item.body}</p>}
-            <Link className="btn primary" to={`/projects/${item.project_id}?task=${item.task_id}`}>
+            <Link className="btn primary" to={item.task_id ? `/projects/${item.project_id}?task=${item.task_id}`
+              : `/projects/${item.project_id}?tab=thread`}>
               {KIND[item.kind].action}
             </Link>
           </section>
