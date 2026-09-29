@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     sandbox_timeout: int = 180
     github_token: str = ""
     makaseta_password: str = ""
+    # Providers allowed to read confidential 資料室 (comma separated), e.g. models running in your own cloud account.
+    confidential_providers: str = "bedrock"
 
     aws_dir: Path = Path.home() / ".aws"
     aws_profile: str = "default"

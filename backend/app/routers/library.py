@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import library
 from ..config import get_settings
 from ..db import get_session
-from ..extract import EDITABLE_SUFFIXES, TEXT_SUFFIXES, decode_text
+from ..extract import EDITABLE_SUFFIXES, EXTRACTABLE_SUFFIXES, TEXT_SUFFIXES, decode_text, extract_text
 from ..library import LibraryError
 from ..models import Document, LibraryRoom
 
@@ -32,6 +32,7 @@ def _fail(exc: LibraryError) -> HTTPException:
 class RoomOut(BaseModel):
     name: str
     description: str
+    confidential: bool = False
     documents: int
     total_size: int
     updated_at: datetime | None
@@ -43,7 +44,19 @@ class RoomCreate(BaseModel):
 
 
 class RoomUpdate(BaseModel):
-    description: str = Field(max_length=2000)
+    description: str | None = Field(default=None, max_length=2000)
+    confidential: bool | None = None
+
+
+class VersionOut(BaseModel):
+    version: str
+    size: int
+    saved_at: datetime
+
+
+class RestoreIn(BaseModel):
+    path: str
+    version: str
 
 
 class EntryOut(BaseModel):
@@ -129,6 +142,7 @@ def list_rooms(session: SessionDep) -> list[RoomOut]:
             RoomOut(
                 name=name,
                 description=settings[name].description if name in settings else "",
+                confidential=settings[name].confidential if name in settings else False,
                 documents=count,
                 total_size=size,
                 updated_at=updated,
@@ -153,14 +167,53 @@ def create_room(body: RoomCreate, session: SessionDep) -> RoomOut:
 
 
 @router.patch("/rooms/{room}")
-def update_room(room: str, body: RoomUpdate, session: SessionDep) -> dict[str, str]:
+def update_room(room: str, body: RoomUpdate, session: SessionDep) -> dict:
     try:
         library.room_dir(room)
     except LibraryError as exc:
         raise _fail(exc) from exc
-    session.merge(LibraryRoom(name=room, description=body.description))
+    settings = session.get(LibraryRoom, room) or LibraryRoom(name=room, description="", confidential=False)
+    if body.description is not None:
+        settings.description = body.description
+    if body.confidential is not None:
+        settings.confidential = body.confidential
+    session.add(settings)
     session.commit()
-    return {"name": room, "description": body.description}
+    return {"name": room, "description": settings.description, "confidential": settings.confidential}
+
+
+@router.get("/rooms/{room}/versions")
+def list_versions(room: str, path: str) -> list[VersionOut]:
+    try:
+        rel = library.relative(room, library.resolve(room, path))
+        return [VersionOut(**v) for v in library.list_versions(room, rel)]
+    except LibraryError as exc:
+        raise _fail(exc) from exc
+
+
+@router.get("/rooms/{room}/versions/text")
+def version_text(room: str, path: str, version: str) -> TextView:
+    try:
+        rel = library.relative(room, library.resolve(room, path))
+        source = library.version_file(room, rel, version)
+    except LibraryError as exc:
+        raise _fail(exc) from exc
+    try:
+        content = extract_text(source) if source.suffix.lower() in EXTRACTABLE_SUFFIXES else ""
+    except Exception:  # noqa: BLE001 - an unreadable old version is shown as such
+        content = ""
+    return TextView(path=rel, editable=False, source="extracted" if content else "none", content=content)
+
+
+@router.post("/rooms/{room}/versions/restore")
+def restore_version(room: str, body: RestoreIn, session: SessionDep) -> dict[str, str]:
+    try:
+        rel = library.relative(room, library.resolve(room, body.path))
+        library.restore_version(session, room, rel, body.version)
+    except LibraryError as exc:
+        raise _fail(exc) from exc
+    session.commit()
+    return {"path": rel, "restored": body.version}
 
 
 @router.delete("/rooms/{room}", status_code=status.HTTP_204_NO_CONTENT)
@@ -291,6 +344,7 @@ def _write_text(room: str, body: TextFile, session: Session, create: bool) -> En
     if not create and not target.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "ファイルが見つかりません")
     target.parent.mkdir(parents=True, exist_ok=True)
+    library.keep_old_version(room, target)
     target.write_text(body.content, encoding="utf-8")
     library.index_file(session, room, target, force=True)
     session.commit()
@@ -320,6 +374,7 @@ def upload(
 
     saved = []
     for upload_file, target in zip(files, targets):
+        library.keep_old_version(room, target)
         _save_upload(upload_file, target)
         doc = library.index_file(session, room, target, force=True)
         session.commit()

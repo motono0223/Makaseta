@@ -1,6 +1,6 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ApiError, LibraryEntry, SearchHit, api } from "../api";
+import { ApiError, LibraryEntry, LibraryRoom as LibraryRoomInfo, SearchHit, api } from "../api";
 import FileViewer from "../components/FileViewer";
 import SearchResults from "../components/SearchResults";
 import { formatDate, formatSize, libraryPath } from "../format";
@@ -212,11 +212,55 @@ export default function LibraryRoom() {
         )}
       </section>
 
+      {!folder && <RoomSettings room={room} onError={setError} />}
+
       {!folder && (
         <p className="footnote">
           <button type="button" className="link-button danger small" onClick={onDeleteRoom}>この資料室を削除</button>
         </p>
       )}
     </>
+  );
+}
+
+function RoomSettings({ room, onError }: { room: string; onError: (message: string) => void }) {
+  const [settings, setSettings] = useState<LibraryRoomInfo | null>(null);
+  const [description, setDescription] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.rooms().then((rooms) => {
+      const found = rooms.find((r) => r.name === room) ?? null;
+      setSettings(found);
+      setDescription(found?.description ?? "");
+    }).catch(() => undefined);
+  }, [room]);
+
+  async function save(changes: { description?: string; confidential?: boolean }) {
+    setSaved(false);
+    try {
+      await api.updateRoom(room, changes);
+      setSettings((s) => s && { ...s, ...changes });
+      setSaved(true);
+    } catch (e) {
+      onError((e as Error).message);
+    }
+  }
+
+  if (!settings) return null;
+  return (
+    <section className="card">
+      <h2>この資料室の設定</h2>
+      <div className="inline-form">
+        <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="説明（例: 就業規則や各種規程）"
+          aria-label="資料室の説明" maxLength={2000} />
+        <button type="button" className="btn" onClick={() => save({ description })}>説明を保存</button>
+      </div>
+      <label className="toggle">
+        <input type="checkbox" checked={settings.confidential} onChange={(e) => save({ confidential: e.target.checked })} />
+        🔒 機密にする（許可したモデルを使う社員だけが読めます。既定では Bedrock のみ。.env の CONFIDENTIAL_PROVIDERS で変更）
+      </label>
+      {saved && <p className="status ok small">保存しました</p>}
+    </section>
   );
 }

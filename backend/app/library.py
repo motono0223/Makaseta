@@ -7,6 +7,7 @@ Hidden files and folders (names starting with ".") are ignored and cannot be cre
 
 import logging
 import os
+import re
 from contextlib import contextmanager
 import shutil
 import threading
@@ -78,11 +79,46 @@ def keep_old_version(room: str, target: Path) -> Path | None:
     if not target.is_file():
         return None
     rel = relative(room, target)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-%f")  # unique even within one second
     copy = room_dir(room) / VERSIONS_DIR / rel / f"{stamp}{target.suffix}"
     copy.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(target, copy)
     return copy
+
+
+VERSION_NAME = re.compile(r"^\d{8}-\d{6}(-\d{6})?(\.[A-Za-z0-9]+)?$")
+
+
+def versions_dir(room: str, rel: str) -> Path:
+    return room_dir(room) / VERSIONS_DIR / rel
+
+
+def list_versions(room: str, rel: str) -> list[dict]:
+    folder = versions_dir(room, rel)
+    if not folder.is_dir():
+        return []
+    return [{"version": p.name, "size": p.stat().st_size,
+             "saved_at": datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).isoformat()}
+            for p in sorted(folder.iterdir(), reverse=True) if p.is_file() and VERSION_NAME.match(p.name)]
+
+
+def version_file(room: str, rel: str, version: str) -> Path:
+    if not VERSION_NAME.match(version):
+        raise LibraryError("版の指定が正しくありません")
+    path = versions_dir(room, rel) / version
+    if not path.is_file():
+        raise LibraryError("その版は見つかりません", 404)
+    return path
+
+
+def restore_version(session, room: str, rel: str, version: str) -> None:
+    """Put an old version back, keeping the current file as a version first."""
+    data = version_file(room, rel, version).read_bytes()
+    target = resolve(room, rel)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    keep_old_version(room, target)
+    target.write_bytes(data)
+    index_file(session, room, target, force=True)
 
 
 def list_room_names() -> list[str]:

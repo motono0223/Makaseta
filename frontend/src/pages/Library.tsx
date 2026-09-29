@@ -140,7 +140,7 @@ export default function Library() {
             <div className="agent-card-head">
               <span className="room-icon" aria-hidden="true">📁</span>
               <div className="grow">
-                <div className="agent-name">{r.name}</div>
+                <div className="agent-name">{r.name}{r.confidential && <span className="badge badge-secret">🔒 機密</span>}</div>
                 <div className="muted small">{r.description || "説明なし"}</div>
               </div>
             </div>

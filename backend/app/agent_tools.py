@@ -20,7 +20,8 @@ from .config import get_settings
 from .library import LibraryError
 from .sandbox import SandboxError
 from .skill_packages import SkillPackageError
-from .models import Agent, Deliverable, Document, Project, Task
+from .llm_profiles import load_profiles
+from .models import Agent, Deliverable, Document, LibraryRoom, Project, Task
 
 READ_CHUNK = 20_000
 SEARCH_LIMIT = 10
@@ -295,6 +296,8 @@ class ToolContext:
     workspace: str = ""
     allowed: set[str] = field(default_factory=set)
     rooms: dict[str, str] = field(default_factory=dict)  # room -> read | write
+    # Linked rooms this agent's model may not read (confidential, and its provider is not allowed).
+    blocked: set[str] = field(default_factory=set)
 
     @classmethod
     def build(cls, session: Session, agent: Agent, project: Project, task: Task | None,
@@ -302,7 +305,8 @@ class ToolContext:
         return cls(session=session, agent=agent, project=project, task=task,
                    workspace=sandbox.workspace_name(task.id if task else None, plan_id),
                    allowed={t["name"] for t in tools_for(agent, kind)},
-                   rooms={r.room: r.access for r in project.rooms})
+                   rooms={r.room: r.access for r in project.rooms},
+                   blocked=blocked_rooms(session, agent, [r.room for r in project.rooms]))
 
 
 class ToolFailure(Exception):
@@ -329,21 +333,38 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> str:
         raise ToolFailure(f"引数が正しくありません: {exc}") from exc
 
 
+def blocked_rooms(session: Session, agent: Agent, rooms: list[str]) -> set[str]:
+    """Confidential rooms among `rooms` that this agent's model provider may not read."""
+    confidential = set(session.scalars(select(LibraryRoom.name).where(
+        LibraryRoom.name.in_(rooms), LibraryRoom.confidential.is_(True))))
+    if not confidential:
+        return set()
+    allowed = {p.strip() for p in get_settings().confidential_providers.split(",") if p.strip()}
+    profile = next((p for p in load_profiles(get_settings()) if p.name == agent.model_profile), None)
+    return set() if profile is not None and profile.provider in allowed else confidential
+
+
 def _room(ctx: ToolContext, room: str, write: bool = False) -> str:
     access = ctx.rooms.get(room)
     if access is None:
         linked = "、".join(ctx.rooms) or "なし"
         raise ToolFailure(f"資料室「{room}」はこのプロジェクトにリンクされていません（リンク済み: {linked}）")
+    if room in ctx.blocked:
+        raise ToolFailure(f"資料室「{room}」は機密扱いのため、あなたが使っているモデルでは読めません。"
+                          "オフィス長に、この資料室を読める社員への依頼を相談してください")
     if write and access != "write":
         raise ToolFailure(f"資料室「{room}」は読み取り専用です")
     return room
 
 
 def _search(ctx: ToolContext, args: dict) -> str:
-    rooms = [_room(ctx, args["room"])] if args.get("room") else list(ctx.rooms)
+    rooms = [_room(ctx, args["room"])] if args.get("room") else [r for r in ctx.rooms if r not in ctx.blocked]
     terms = [t for t in str(args["query"]).split() if t][:8]
+    if not rooms and ctx.blocked:
+        return "リンクされた資料室はすべて機密のため、あなたが使っているモデルでは検索できません。"
     if not rooms or not terms:
         return "検索対象の資料室がないか、検索語が空です。"
+    skipped = f"（機密のため検索しなかった資料室: {'、'.join(sorted(ctx.blocked))}）" if ctx.blocked and not args.get("room") else ""
     matches = [_term_match(t) for t in terms]
     base = select(Document).where(Document.room.in_(rooms))
     docs = list(ctx.session.scalars(base.where(and_(*matches)).limit(SEARCH_LIMIT)))
@@ -353,8 +374,8 @@ def _search(ctx: ToolContext, args: dict) -> str:
         docs = list(ctx.session.scalars(base.where(or_(*matches)).limit(SEARCH_LIMIT)))
         note = "（すべての語を含む文書はなかったため、いずれかの語を含む文書を示します）"
     if not docs:
-        return f"「{args['query']}」に一致する文書はありませんでした。言い換えや別の語でも検索してみてください。"
-    lines = [f"{len(docs)}件見つかりました{note}。"]
+        return f"「{args['query']}」に一致する文書はありませんでした。言い換えや別の語でも検索してみてください。{skipped}"
+    lines = [f"{len(docs)}件見つかりました{note}。{skipped}"]
     for d in docs:
         lines.append(f"- 資料室: {d.room} / パス: {d.path}（{len(d.text)}字）\n  抜粋: {_snippet(d.text, terms)}")
     return "\n".join(lines)

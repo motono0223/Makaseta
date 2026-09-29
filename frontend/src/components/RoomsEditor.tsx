@@ -15,7 +15,12 @@ export default function RoomsEditor({ rooms, value, onChange }: Props) {
         <div key={l.room} className="member-row">
           <span className="room-icon small-icon" aria-hidden="true">📁</span>
           <div className="grow">
-            <div className="agent-name">{l.room}</div>
+            <div className="agent-name">
+              {l.room}
+              {(l.confidential || rooms.find((r) => r.name === l.room)?.confidential) && (
+                <span className="badge badge-secret" title="許可したモデル（既定は Bedrock）の社員だけが読めます">🔒 機密</span>
+              )}
+            </div>
             {l.exists === false && <div className="status bad small">フォルダが見つかりません</div>}
           </div>
           <select value={l.access} onChange={(e) => setAccess(l.room, e.target.value as RoomLink["access"])}

@@ -4,12 +4,12 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from .. import library, work
 from ..db import get_session
 from ..library import LibraryError
-from ..models import Agent, Project, ProjectMember, ProjectRole, ProjectRoom, Task
+from ..models import Agent, LibraryRoom, Project, ProjectMember, ProjectRole, ProjectRoom, Task
 
 router = APIRouter(prefix="/api", tags=["projects"])
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -60,6 +60,7 @@ class RoomLinkOut(BaseModel):
     room: str
     access: Access
     exists: bool
+    confidential: bool = False
 
 
 class ProjectOut(BaseModel):
@@ -346,6 +347,8 @@ def _get_task(session: Session, task_id: int) -> Task:
 
 def _project_out(project: Project, counts: dict[str, int]) -> ProjectOut:
     existing_rooms = set(library.list_room_names())
+    confidential = {r.name for r in object_session(project).scalars(
+        select(LibraryRoom).where(LibraryRoom.confidential.is_(True)))} if object_session(project) else set()
     return ProjectOut(
         id=project.id,
         name=project.name,
@@ -355,7 +358,8 @@ def _project_out(project: Project, counts: dict[str, int]) -> ProjectOut:
         status=project.status,
         require_plan_approval=project.require_plan_approval,
         members=[MemberOut.model_validate(m) for m in project.members],
-        rooms=[RoomLinkOut(room=r.room, access=r.access, exists=r.room in existing_rooms) for r in project.rooms],
+        rooms=[RoomLinkOut(room=r.room, access=r.access, exists=r.room in existing_rooms,
+                           confidential=r.room in confidential) for r in project.rooms],
         task_counts=counts,
         created_at=project.created_at,
         updated_at=project.updated_at,

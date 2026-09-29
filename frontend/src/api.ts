@@ -116,6 +116,7 @@ export type AgentInput = {
 export type LibraryRoom = {
   name: string;
   description: string;
+  confidential: boolean;
   documents: number;
   total_size: number;
   updated_at: string | null;
@@ -158,7 +159,8 @@ export type Priority = "high" | "normal" | "low";
 export type ProjectRole = { id: number; key: string | null; name: string; description: string; is_manager: boolean };
 export type AgentBrief = Pick<Agent, "id" | "name" | "title" | "avatar_color" | "status" | "active">;
 export type ProjectMember = { agent: AgentBrief; role: ProjectRole; is_primary: boolean };
-export type RoomLink = { room: string; access: "read" | "write"; exists?: boolean };
+export type RoomLink = { room: string; access: "read" | "write"; exists?: boolean; confidential?: boolean };
+export type FileVersion = { version: string; size: number; saved_at: string };
 
 export type Project = {
   id: number;
@@ -418,7 +420,14 @@ export const api = {
   rooms: () => request<LibraryRoom[]>("GET", "/api/library/rooms"),
   createRoom: (name: string, description: string) =>
     request<LibraryRoom>("POST", "/api/library/rooms", { name, description }),
-  updateRoom: (name: string, description: string) => request<unknown>("PATCH", room(name), { description }),
+  updateRoom: (name: string, changes: { description?: string; confidential?: boolean }) =>
+    request<unknown>("PATCH", room(name), changes),
+  versions: (roomName: string, path: string) =>
+    request<FileVersion[]>("GET", `${room(roomName)}/versions?${q({ path })}`),
+  versionText: (roomName: string, path: string, version: string) =>
+    request<TextView>("GET", `${room(roomName)}/versions/text?${q({ path, version })}`),
+  restoreVersion: (roomName: string, path: string, version: string) =>
+    request<unknown>("POST", `${room(roomName)}/versions/restore`, { path, version }),
   deleteRoom: (name: string) => request<void>("DELETE", room(name)),
   entries: (roomName: string, path: string) =>
     request<LibraryEntry[]>("GET", `${room(roomName)}/entries?${q({ path })}`),
