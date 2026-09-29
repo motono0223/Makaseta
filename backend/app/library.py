@@ -7,6 +7,7 @@ Hidden files and folders (names starting with ".") are ignored and cannot be cre
 
 import logging
 import os
+from contextlib import contextmanager
 import shutil
 import threading
 from datetime import datetime, timezone
@@ -198,6 +199,12 @@ class Scanner:
     @property
     def scanning(self) -> bool:
         return self._lock.locked()
+
+    @contextmanager
+    def paused(self):
+        """Hold off scans while the library is being replaced."""
+        with self._lock:
+            yield
 
     def scan_now(self) -> dict[str, int]:
         with self._lock, self._session_factory()() as session:

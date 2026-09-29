@@ -478,6 +478,16 @@ export const api = {
   inbox: () => request<InboxItem[]>("GET", "/api/inbox"),
   usage: () => request<UsageSummary>("GET", "/api/usage/summary"),
 
+  exportOffice: (includeWork: boolean) =>
+    request<{ name: string; size: number }>("POST", "/api/office/export", { include_work: includeWork }),
+  officeExports: () => request<{ name: string; size: number; created_at: string }[]>("GET", "/api/office/exports"),
+  deleteOfficeExport: (name: string) => request<void>("DELETE", `/api/office/exports/${encodeURIComponent(name)}`),
+  importOffice: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<{ backup: string; tables: Record<string, number>; created_at: string }>("POST", "/api/office/import", form);
+  },
+
   search: (text: string, roomName?: string) =>
     request<SearchHit[]>("GET", `/api/library/search?${q(roomName ? { q: text, room: roomName } : { q: text })}`),
 };

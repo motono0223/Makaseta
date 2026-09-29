@@ -1348,3 +1348,6 @@ dialog.dialog[open] {
   gap: 4px;
   margin: 8px 0;
 }
+.spaced-table {
+  margin-top: 12px;
+}

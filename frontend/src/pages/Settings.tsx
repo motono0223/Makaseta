@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ModelProfile, UsageSummary, UsageRow } from "../api";
+import OfficeMove from "../components/OfficeMove";
 
 export default function Settings() {
   const [profiles, setProfiles] = useState<ModelProfile[] | null>(null);
@@ -77,6 +78,8 @@ export default function Settings() {
           <p className="muted small">料金は config/models.yaml の price_per_mtok から計算した目安です。</p>
         </section>
       )}
+
+      <OfficeMove />
     </>
   );
 }
