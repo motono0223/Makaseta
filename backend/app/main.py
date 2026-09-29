@@ -1,14 +1,28 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 from . import __version__
+from .catalog import seed_builtin_skills
 from .config import get_settings
-from .db import check_database
+from .db import check_database, run_migrations, session_factory
 from .llm_profiles import ModelProfile, load_profiles
+from .routers import agents
 
-app = FastAPI(title="makaseta", version=__version__)
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    run_migrations()
+    with session_factory()() as session:
+        seed_builtin_skills(session)
+    yield
+
+
+app = FastAPI(title="makaseta", version=__version__, lifespan=lifespan)
+app.include_router(agents.router)
 
 
 @app.get("/api/health")

@@ -38,7 +38,7 @@ export default function Home() {
           <li>社員名簿で社員を雇う</li>
           <li>プロジェクトを立ち上げ、マネージャー社員をアサインする</li>
         </ol>
-        <p className="muted">社員名簿・プロジェクト・バケットはフェーズ1で順に実装します。</p>
+        <p className="muted">プロジェクト・資料室はフェーズ1で順に実装します。</p>
       </section>
     </>
   );

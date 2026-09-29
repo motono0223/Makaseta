@@ -20,6 +20,8 @@ WORKDIR /app
 COPY backend/requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY backend/alembic.ini ./
+COPY backend/migrations ./migrations
 COPY backend/app ./app
 COPY --from=frontend /build/dist ./static
 
