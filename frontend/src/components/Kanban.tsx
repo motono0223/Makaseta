@@ -2,6 +2,7 @@ import { DragEvent, useState } from "react";
 import { ProjectMember, Task, TaskStatus } from "../api";
 import { PRIORITY, TASK_COLUMNS } from "../labels";
 import Avatar from "./Avatar";
+import { useThread } from "./ThreadDrawer";
 
 type Props = {
   tasks: Task[];
@@ -15,6 +16,7 @@ export default function Kanban({ tasks, members, onOpen, onAdd, onMove }: Props)
   const [dragging, setDragging] = useState<Task | null>(null);
   const [over, setOver] = useState<{ status: TaskStatus; index: number } | null>(null);
   const agentById = new Map(members.map((m) => [m.agent.id, m.agent]));
+  const openThread = useThread();
 
   const column = (status: TaskStatus) =>
     tasks.filter((t) => t.status === status).sort((a, b) => a.rank - b.rank || a.id - b.id);
@@ -78,7 +80,13 @@ export default function Kanban({ tasks, members, onOpen, onAdd, onMove }: Props)
                     {t.due_date && <span className="muted small">期限 {t.due_date}</span>}
                     <span className="push-right">
                       {assignee ? (
-                        <span title={assignee.name}><Avatar name={assignee.name} color={assignee.avatar_color} size={24} /></span>
+                        <button type="button" className="avatar-button" title={`${assignee.name}のスレッドを開く`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openThread(assignee.id);
+                          }}>
+                          <Avatar name={assignee.name} color={assignee.avatar_color} size={24} />
+                        </button>
                       ) : (
                         <span className="muted small">未割当</span>
                       )}

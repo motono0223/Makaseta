@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -11,7 +12,10 @@ from .config import get_settings
 from .db import check_database, run_migrations, session_factory
 from .library import Scanner
 from .llm_profiles import ModelProfile, load_profiles
-from .routers import agents, library, projects
+from .routers import agents, library, projects, work
+from .worker import Worker
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
 @asynccontextmanager
@@ -23,7 +27,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_settings().library_root.mkdir(parents=True, exist_ok=True)
     app.state.scanner = Scanner(session_factory, get_settings().library_scan_interval)
     app.state.scanner.start()
+    app.state.worker = Worker(session_factory, get_settings().max_concurrent_runs)
+    app.state.worker.start()
     yield
+    app.state.worker.stop()
     app.state.scanner.stop()
 
 
@@ -31,6 +38,7 @@ app = FastAPI(title="makaseta", version=__version__, lifespan=lifespan)
 app.include_router(agents.router)
 app.include_router(library.router)
 app.include_router(projects.router)
+app.include_router(work.router)
 
 
 @app.get("/api/health")

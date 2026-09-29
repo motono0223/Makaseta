@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { api, ModelProfile } from "../api";
+import { api, ModelProfile, UsageSummary, UsageRow } from "../api";
 
 export default function Settings() {
   const [profiles, setProfiles] = useState<ModelProfile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
 
   useEffect(() => {
     api.modelProfiles().then(setProfiles).catch((e: Error) => setError(e.message));
+    api.usage().then(setUsage).catch(() => undefined);
   }, []);
 
   return (
@@ -55,6 +57,50 @@ export default function Settings() {
           </table>
         )}
       </section>
+
+      {usage && (
+        <section className="card">
+          <h2>今月の利用料金（概算）</h2>
+          <p>
+            <strong>${Number(usage.month_spend_usd).toFixed(4)}</strong>
+            <span className="muted"> / 予算 ${usage.monthly_budget_usd.toFixed(2)}（.env の MONTHLY_BUDGET_USD）</span>
+          </p>
+          <div className="progress">
+            <div className="progress-bar" style={{
+              width: `${Math.min((Number(usage.month_spend_usd) / (usage.monthly_budget_usd || 1)) * 100, 100)}%`,
+            }} />
+          </div>
+          <div className="usage-grid">
+            <UsageTable title="社員別" rows={usage.by_agent} />
+            <UsageTable title="プロジェクト別" rows={usage.by_project} />
+          </div>
+          <p className="muted small">料金は config/models.yaml の price_per_mtok から計算した目安です。</p>
+        </section>
+      )}
     </>
+  );
+}
+
+function UsageTable({ title, rows }: { title: string; rows: UsageRow[] }) {
+  return (
+    <div>
+      <h3>{title}</h3>
+      <table className="table">
+        <tbody>
+          {rows.map((r) => (
+            <tr key={String(r.id)}>
+              <td>{r.name}</td>
+              <td className="num">${r.cost_usd.toFixed(4)}</td>
+              <td className="num muted small">{(r.input_tokens + r.output_tokens).toLocaleString()} tok</td>
+            </tr>
+          ))}
+          {rows.length === 0 && (
+            <tr>
+              <td className="muted">まだ利用はありません</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }

@@ -17,14 +17,14 @@ BUILTIN_SKILLS = [
         "name": "資料検索",
         "description": "リンクされた資料室から、依頼に関係する資料を探して読む",
         "instructions": "依頼のキーワードと言い換えで資料を検索し、関係する文書を読んでから作業する。使った資料は文書名で示す。",
-        "tools": ["search_documents", "read_document"],
+        "tools": ["search_documents", "list_documents", "read_document"],
     },
     {
         "key": "write",
         "name": "文書作成",
         "description": "報告書やメモなどの成果物を下書きする",
         "instructions": "目的と読み手を確認し、結論を先に書く。見出しと箇条書きで整理し、成果物として保存する。",
-        "tools": ["write_document"],
+        "tools": ["submit_deliverable"],
     },
     {
         "key": "summarize",
@@ -38,14 +38,14 @@ BUILTIN_SKILLS = [
         "name": "レビュー",
         "description": "成果物の誤りや抜け漏れを確認する",
         "instructions": "依頼の目的に照らして確認し、事実誤り・根拠のない記述・抜け漏れを優先度付きで指摘する。指摘には修正案を添える。",
-        "tools": ["read_document"],
+        "tools": ["list_documents", "read_document"],
     },
     {
         "key": "plan",
         "name": "タスク分解",
         "description": "依頼を具体的なタスクに分け、担当を割り振る",
         "instructions": "依頼のゴールと完了条件を確認し、1人が一度に終えられる大きさのタスクに分ける。各タスクに期待する成果物とロールを書く。",
-        "tools": ["update_task", "send_message"],
+        "tools": [],
     },
 ]
 

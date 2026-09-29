@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { TextView, api, libraryUrl } from "../api";
+import Markdown from "./Markdown";
 
 type Props = { room: string; path: string; onClose: () => void; onSaved: () => void };
 
@@ -58,7 +59,13 @@ export default function FileViewer({ room, path, onClose, onSaved }: Props) {
       )}
       {view?.extract_error && <p className="status bad small">テキストを取り出せませんでした: {view.extract_error}</p>}
       {view?.source === "none" && <p className="muted">この形式は表示できません。ダウンロードして開いてください。</p>}
-      {view && view.source !== "none" && !editing && <pre className="file-content">{view.content || "（空のファイル）"}</pre>}
+      {view && view.source !== "none" && !editing && (
+        /\.(md|markdown)$/i.test(path) && view.content ? (
+          <div className="file-content rendered"><Markdown>{view.content}</Markdown></div>
+        ) : (
+          <pre className="file-content">{view.content || "（空のファイル）"}</pre>
+        )
+      )}
       {editing && (
         <>
           <textarea className="file-editor" value={draft} onChange={(e) => setDraft(e.target.value)} rows={18} />

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
 
     default_model_profile: str = "claude-main"
+    max_concurrent_runs: int = 3
+    monthly_budget_usd: float = 50.0
+    max_steps_per_run: int = 40
     embedding_model_profile: str = "embed-main"
 
 

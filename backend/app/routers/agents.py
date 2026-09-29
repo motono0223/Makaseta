@@ -128,7 +128,7 @@ def _check_unique_name(session: Session, name: str, exclude_id: int | None = Non
 
 def _load_skills(session: Session, skill_ids: list[int]) -> list[Skill]:
     ids = list(dict.fromkeys(skill_ids))
-    skills = list(session.scalars(select(Skill).where(Skill.id.in_(ids)))) if ids else []
+    skills = list(session.scalars(select(Skill).where(Skill.id.in_(ids)).order_by(Skill.id))) if ids else []
     if len(skills) != len(ids):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "存在しないスキルが含まれています")
     return skills

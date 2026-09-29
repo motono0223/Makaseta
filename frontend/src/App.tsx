@@ -1,4 +1,9 @@
+import { useCallback, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
+import { api } from "./api";
+import { ThreadProvider } from "./components/ThreadDrawer";
+import Inbox from "./pages/Inbox";
+import { usePolling } from "./usePolling";
 import Home from "./pages/Home";
 import Settings from "./pages/Settings";
 import ComingSoon from "./pages/ComingSoon";
@@ -21,37 +26,46 @@ const NAV = [
 ];
 
 export default function App() {
+  const [inboxCount, setInboxCount] = useState(0);
+  const refreshInbox = useCallback(() => {
+    api.inbox().then((items) => setInboxCount(items.length)).catch(() => undefined);
+  }, []);
+  usePolling(refreshInbox, 8000);
+
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-name">makaseta</span>
-          <span className="brand-sub">任せた</span>
-        </div>
-        <nav>
-          {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-      </aside>
-      <main className="content">
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/staff" element={<Staff />} />
-          <Route path="/staff/new" element={<HireStaff />} />
-          <Route path="/staff/:id" element={<StaffDetail />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/new" element={<ProjectNew />} />
-          <Route path="/projects/:id" element={<ProjectDetail />} />
-          <Route path="/library" element={<Library />} />
-          <Route path="/library/:room/*" element={<LibraryRoom />} />
-          <Route path="/inbox" element={<ComingSoon title="受信箱" what="質問・レビュー待ち・エラーの通知" />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="*" element={<ComingSoon title="ページが見つかりません" what="" />} />
-        </Routes>
-      </main>
-    </div>
+    <ThreadProvider>
+      <div className="shell">
+        <aside className="sidebar">
+          <div className="brand">
+            <span className="brand-name">makaseta</span>
+            <span className="brand-sub">任せた</span>
+          </div>
+          <nav>
+            {NAV.map((item) => (
+              <NavLink key={item.to} to={item.to} end={item.end} className="nav-link">
+                {item.label}
+                {item.to === "/inbox" && inboxCount > 0 && <span className="nav-badge">{inboxCount}</span>}
+              </NavLink>
+            ))}
+          </nav>
+        </aside>
+        <main className="content">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/staff" element={<Staff />} />
+            <Route path="/staff/new" element={<HireStaff />} />
+            <Route path="/staff/:id" element={<StaffDetail />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/new" element={<ProjectNew />} />
+            <Route path="/projects/:id" element={<ProjectDetail />} />
+            <Route path="/library" element={<Library />} />
+            <Route path="/library/:room/*" element={<LibraryRoom />} />
+            <Route path="/inbox" element={<Inbox />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="*" element={<ComingSoon title="ページが見つかりません" what="" />} />
+          </Routes>
+        </main>
+      </div>
+    </ThreadProvider>
   );
 }

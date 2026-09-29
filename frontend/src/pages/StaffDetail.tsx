@@ -4,6 +4,7 @@ import { Agent, AgentInput, Assignment, api } from "../api";
 import AgentForm from "../components/AgentForm";
 import Avatar from "../components/Avatar";
 import StatusBadge from "../components/StatusBadge";
+import { useThread } from "../components/ThreadDrawer";
 import { PRIORITY, PROJECT_STATUS, TASK_STATUS } from "../labels";
 
 export default function StaffDetail() {
@@ -13,6 +14,7 @@ export default function StaffDetail() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const openThread = useThread();
 
   useEffect(() => {
     api.agent(agentId).then(setAgent).catch((e: Error) => setError(e.message));
@@ -68,9 +70,12 @@ export default function StaffDetail() {
           </div>
           <StatusBadge agent={agent} />
         </div>
-        <button type="button" className={agent.active ? "btn danger" : "btn"} onClick={toggleEmployment}>
-          {agent.active ? "退職させる" : "再雇用する"}
-        </button>
+        <div className="header-actions">
+          {agent.active && <button type="button" className="btn primary" onClick={() => openThread(agent.id)}>💬 スレッドを開く</button>}
+          <button type="button" className={agent.active ? "btn danger" : "btn"} onClick={toggleEmployment}>
+            {agent.active ? "退職させる" : "再雇用する"}
+          </button>
+        </div>
       </div>
 
       {notice && <p className="status ok">{notice}</p>}
@@ -96,7 +101,8 @@ export default function StaffDetail() {
               <ul className="task-list">
                 {a.tasks.map((t) => (
                   <li key={t.id}>
-                    <span className={`badge task-${t.status}`}>{TASK_STATUS[t.status]}</span> {t.title}
+                    <span className={`badge task-${t.status}`}>{TASK_STATUS[t.status]}</span>{" "}
+                    <Link to={`/projects/${a.project_id}?task=${t.id}`}>{t.title}</Link>
                     {t.priority !== "normal" && <span className="muted small"> · 優先度 {PRIORITY[t.priority]}</span>}
                   </li>
                 ))}

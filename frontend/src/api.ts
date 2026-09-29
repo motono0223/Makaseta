@@ -177,6 +177,64 @@ export type Assignment = {
   tasks: Task[];
 };
 
+export type RunStep = { id: number; kind: "text" | "tool_call" | "tool_result" | "error" | "info"; name: string; content: string; created_at: string };
+export type Run = {
+  id: number;
+  kind: "task" | "chat";
+  agent_id: number;
+  status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled" | "interrupted";
+  steps: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: string;
+  error: string;
+  awaiting_review: boolean;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  log: RunStep[];
+};
+export type Deliverable = {
+  id: number;
+  agent_id: number | null;
+  room: string;
+  path: string;
+  content: string;
+  status: "draft" | "approved" | "rejected" | "superseded";
+  created_at: string;
+  decided_at: string | null;
+};
+export type Message = {
+  id: number;
+  agent_id: number | null;
+  project_id: number | null;
+  task_id: number | null;
+  run_id: number | null;
+  sender: "manager" | "agent" | "system";
+  kind: "chat" | "report" | "question" | "answer" | "instruction" | "review";
+  body: string;
+  created_at: string;
+};
+export type TaskWork = { runs: Run[]; deliverables: Deliverable[]; question: Message | null; report: Message | null };
+export type InboxItem = {
+  kind: "question" | "review" | "failed";
+  task_id: number;
+  task_title: string;
+  project_id: number;
+  project_name: string;
+  agent_id: number | null;
+  agent_name: string | null;
+  body: string;
+  created_at: string;
+};
+export type UsageRow = { id: number | null; name: string; cost_usd: number; input_tokens: number; output_tokens: number };
+export type UsageSummary = {
+  month_spend_usd: string;
+  monthly_budget_usd: number;
+  by_agent: UsageRow[];
+  by_project: UsageRow[];
+};
+
 export class ApiError extends Error {}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -269,6 +327,19 @@ export const api = {
     request<Task>("POST", `/api/tasks/${id}/move`, { status, position }),
   deleteTask: (id: number) => request<void>("DELETE", `/api/tasks/${id}`),
   assignments: (agentId: number) => request<Assignment[]>("GET", `/api/agents/${agentId}/assignments`),
+
+  taskWork: (taskId: number) => request<TaskWork>("GET", `/api/tasks/${taskId}/work`),
+  answerTask: (taskId: number, body: string) => request<Message>("POST", `/api/tasks/${taskId}/answer`, { body }),
+  approveTask: (taskId: number) => request<Deliverable[]>("POST", `/api/tasks/${taskId}/approve`),
+  rejectTask: (taskId: number, body: string) => request<Run>("POST", `/api/tasks/${taskId}/reject`, { body }),
+  retryTask: (taskId: number) => request<Run>("POST", `/api/tasks/${taskId}/retry`),
+  cancelTask: (taskId: number) => request<unknown>("POST", `/api/tasks/${taskId}/cancel`),
+  agentThread: (agentId: number) => request<Message[]>("GET", `/api/agents/${agentId}/thread`),
+  messageAgent: (agentId: number, body: string, answerTaskId?: number) =>
+    request<Message>("POST", `/api/agents/${agentId}/messages`, { body, answer_task_id: answerTaskId ?? null }),
+  projectThread: (projectId: number) => request<Message[]>("GET", `/api/projects/${projectId}/thread`),
+  inbox: () => request<InboxItem[]>("GET", "/api/inbox"),
+  usage: () => request<UsageSummary>("GET", "/api/usage/summary"),
 
   search: (text: string, roomName?: string) =>
     request<SearchHit[]>("GET", `/api/library/search?${q(roomName ? { q: text, room: roomName } : { q: text })}`),

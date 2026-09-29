@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import library
+from .. import library, work
 from ..db import get_session
 from ..library import LibraryError
 from ..models import Agent, Project, ProjectMember, ProjectRole, ProjectRoom, Task
@@ -271,13 +271,17 @@ def update_task(task_id: int, body: TaskUpdate, session: SessionDep) -> TaskOut:
     if "reviewer_id" in changes:
         _check_member(project, changes["reviewer_id"], "レビュー担当")
     new_status = changes.pop("status", None)
+    if changes.get("assignee_id", task.assignee_id) != task.assignee_id and work.open_run(session, task):
+        raise HTTPException(status.HTTP_409_CONFLICT, "作業中のタスクは担当者を変えられません。先にバックログに戻してください")
     for field, value in changes.items():
         if value is None and field in {"title", "instructions", "expected_output", "priority"}:
             continue
         setattr(task, field, value)
-    if new_status and new_status != task.status:
-        _change_status(session, task, new_status, position=None)
+    old_status = task.status
+    if new_status and new_status != old_status:
+        work.place_task(session, task, new_status)
     _check_assignable(task)
+    work.on_status_change(session, task, old_status, task.status)
     session.commit()
     return task
 
@@ -285,8 +289,10 @@ def update_task(task_id: int, body: TaskUpdate, session: SessionDep) -> TaskOut:
 @router.post("/tasks/{task_id}/move")
 def move_task(task_id: int, body: TaskMove, session: SessionDep) -> TaskOut:
     task = _get_task(session, task_id)
-    _change_status(session, task, body.status, position=body.position)
+    old_status = task.status
+    work.place_task(session, task, body.status, position=body.position)
     _check_assignable(task)
+    work.on_status_change(session, task, old_status, task.status)
     session.commit()
     return task
 
@@ -440,22 +446,3 @@ def _check_assignable(task: Task) -> None:
 def _next_rank(session: Session, project_id: int, task_status: str) -> int:
     top = session.scalar(select(func.max(Task.rank)).where(Task.project_id == project_id, Task.status == task_status))
     return (top or 0) + 1
-
-
-def _change_status(session: Session, task: Task, new_status: str, position: int | None) -> None:
-    """Move a task into a column, at a position (0 = top) or at the bottom."""
-    column = [
-        t for t in session.scalars(
-            select(Task).where(Task.project_id == task.project_id, Task.status == new_status, Task.id != task.id)
-            .order_by(Task.rank, Task.id)
-        )
-    ]
-    index = len(column) if position is None else min(position, len(column))
-    column.insert(index, task)
-    for rank, t in enumerate(column, start=1):
-        t.rank = rank
-    if new_status == "done" and task.status != "done":
-        task.completed_at = datetime.now(timezone.utc)
-    elif new_status != "done":
-        task.completed_at = None
-    task.status = new_status

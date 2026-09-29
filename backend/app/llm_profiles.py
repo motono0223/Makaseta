@@ -9,6 +9,8 @@ import yaml
 from .config import Settings
 
 PLACEHOLDER_PREFIX = "REPLACE_WITH_"
+# Providers the LLM gateway can call today (see app/llm.py).
+IMPLEMENTED_PROVIDERS = {"anthropic", "bedrock"}
 
 
 class ModelProfile(BaseModel):
@@ -18,6 +20,9 @@ class ModelProfile(BaseModel):
     model: str
     kind: str = "chat"
     supports_tools: bool = False
+    # USD per million tokens; None when unknown (usage is still recorded, cost shows as 0)
+    price_input: float | None = None
+    price_output: float | None = None
     available: bool
     reason: str = ""
     is_default: bool = False
@@ -57,6 +62,9 @@ def load_profiles(settings: Settings) -> list[ModelProfile]:
         available, reason = _credential_status(provider, settings)
         if available and (not model or model.startswith(PLACEHOLDER_PREFIX)):
             available, reason = False, "config/models.yaml の model が未記入です"
+        if available and provider not in IMPLEMENTED_PROVIDERS and spec.get("kind", "chat") == "chat":
+            available, reason = False, f"{provider} の呼び出しはまだ実装されていません（今後対応）"
+        price = spec.get("price_per_mtok") or {}
         profiles.append(
             ModelProfile(
                 name=name,
@@ -65,6 +73,8 @@ def load_profiles(settings: Settings) -> list[ModelProfile]:
                 model=model,
                 kind=str(spec.get("kind", "chat")),
                 supports_tools=bool(spec.get("supports_tools", False)),
+                price_input=price.get("input"),
+                price_output=price.get("output"),
                 available=available,
                 reason=reason,
                 is_default=name in defaults,

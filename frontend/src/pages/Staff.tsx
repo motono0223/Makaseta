@@ -3,12 +3,14 @@ import { Link } from "react-router-dom";
 import { Agent, ModelProfile, api } from "../api";
 import Avatar from "../components/Avatar";
 import StatusBadge from "../components/StatusBadge";
+import { useThread } from "../components/ThreadDrawer";
 
 export default function Staff() {
   const [agents, setAgents] = useState<Agent[] | null>(null);
   const [profiles, setProfiles] = useState<ModelProfile[]>([]);
   const [showRetired, setShowRetired] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const openThread = useThread();
 
   useEffect(() => {
     api.agents(showRetired).then(setAgents).catch((e: Error) => setError(e.message));
@@ -59,6 +61,14 @@ export default function Staff() {
               <StatusBadge agent={a} />
             </div>
             <div className="muted small">モデル: {profileLabel(a.model_profile)}</div>
+            {a.active && (
+              <button type="button" className="btn small-btn" onClick={(e) => {
+                e.preventDefault();
+                openThread(a.id);
+              }}>
+                💬 話す
+              </button>
+            )}
             <div className="chips">
               {a.skills.length === 0 && <span className="muted small">スキルなし</span>}
               {a.skills.map((s) => (

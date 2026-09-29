@@ -16,23 +16,35 @@ import {
 } from "../api";
 import Avatar from "../components/Avatar";
 import Kanban from "../components/Kanban";
+import ProjectThread from "../components/ProjectThread";
 import MembersEditor from "../components/MembersEditor";
 import ProjectFields from "../components/ProjectFields";
 import RoomsEditor from "../components/RoomsEditor";
 import TaskDialog from "../components/TaskDialog";
+import { useThread } from "../components/ThreadDrawer";
 import { libraryPath } from "../format";
 import { PROJECT_STATUS } from "../labels";
+import { usePolling } from "../usePolling";
 
-type Tab = "board" | "settings";
+type Tab = "board" | "thread" | "settings";
 
 export default function ProjectDetail() {
   const projectId = Number(useParams().id);
   const navigate = useNavigate();
+  const openThread = useThread();
   const [params, setParams] = useSearchParams();
-  const tab: Tab = params.get("tab") === "settings" ? "settings" : "board";
+  const tab: Tab = (["board", "thread", "settings"] as const).find((t) => t === params.get("tab")) ?? "board";
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [editing, setEditing] = useState<Task | "new" | null>(null);
+  const openTaskId = params.get("task");
+  const editing: Task | "new" | null =
+    openTaskId === "new" ? "new" : openTaskId ? tasks.find((t) => t.id === Number(openTaskId)) ?? null : null;
+  const setEditing = (t: Task | "new" | null) => {
+    const next = new URLSearchParams(params);
+    if (t === null) next.delete("task");
+    else next.set("task", t === "new" ? "new" : String(t.id));
+    setParams(next);
+  };
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
@@ -40,7 +52,8 @@ export default function ProjectDetail() {
     api.tasks(projectId).then(setTasks).catch((e: Error) => setError(e.message));
   }, [projectId]);
 
-  useEffect(load, [load]);
+  const busy = tasks.some((t) => t.status === "in_progress" || t.status === "waiting");
+  usePolling(load, busy ? 3000 : 10000);
 
   async function moveTask(task: Task, status: TaskStatus, position: number) {
     setError(null);
@@ -92,13 +105,13 @@ export default function ProjectDetail() {
 
       <div className="member-strip">
         {project.members.map((m) => (
-          <Link key={m.agent.id} to={`/staff/${m.agent.id}`} className="member-chip" title="社員の詳細を開く">
+          <button key={m.agent.id} type="button" className="member-chip" title="スレッドを開く" onClick={() => openThread(m.agent.id)}>
             <Avatar name={m.agent.name} color={m.agent.avatar_color} size={28} />
             <span>
               {m.agent.name}
               <span className="muted small"> {m.role.name}{m.is_primary && "・窓口"}</span>
             </span>
-          </Link>
+          </button>
         ))}
         {project.rooms.map((r) => (
           <Link key={r.room} to={libraryPath(r.room)} className="member-chip room-chip">
@@ -110,6 +123,9 @@ export default function ProjectDetail() {
 
       <nav className="tabs">
         <button type="button" className={tab === "board" ? "active" : ""} onClick={() => setParams({})}>カンバン</button>
+        <button type="button" className={tab === "thread" ? "active" : ""} onClick={() => setParams({ tab: "thread" })}>
+          スレッド
+        </button>
         <button type="button" className={tab === "settings" ? "active" : ""} onClick={() => setParams({ tab: "settings" })}>
           設定
         </button>
@@ -117,12 +133,13 @@ export default function ProjectDetail() {
 
       {error && <p className="status bad">{error}</p>}
 
-      {tab === "board" ? (
+      {tab === "board" && (
         <Kanban tasks={tasks} members={project.members} onOpen={setEditing} onAdd={() => setEditing("new")}
           onMove={moveTask} />
-      ) : (
-        <ProjectSettings project={project} onSaved={setProject}
-          onDeleted={() => navigate("/projects")} />
+      )}
+      {tab === "thread" && <ProjectThread project={project} tasks={tasks} />}
+      {tab === "settings" && (
+        <ProjectSettings project={project} onSaved={setProject} onDeleted={() => navigate("/projects")} />
       )}
 
       {editing && (
@@ -136,6 +153,7 @@ export default function ProjectDetail() {
             load();
           }}
           onClose={() => setEditing(null)}
+          onChanged={load}
         />
       )}
     </>

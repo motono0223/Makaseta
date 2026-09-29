@@ -5,6 +5,7 @@
 #   - Anthropic API: Claude のモデルID（例: claude-haiku-4-5-20251001, claude-opus-5）
 #   - Bedrock: anthropic. で始まるモデルID（リージョンで使えるものを確認）
 #   - OpenAI / Gemini / DeepSeek: 各APIのモデル名
+# price_per_mtok は100万トークンあたりの料金（米ドル）で、コストの概算に使います。
 # 認証情報（APIキーなど）はここには書かず、.env に書きます。
 
 profiles:
@@ -13,12 +14,15 @@ profiles:
     provider: anthropic
     model: claude-haiku-4-5-20251001
     supports_tools: true
+    price_per_mtok: { input: 1.0, output: 5.0 }
 
   claude-bedrock:
     label: Claude（Bedrock）
     provider: bedrock
     model: anthropic.claude-opus-5
     supports_tools: true
+    # Bedrock の料金は AWS の価格表で確認してください（ここは目安）
+    price_per_mtok: { input: 5.0, output: 25.0 }
 
   openai-main:
     label: OpenAI

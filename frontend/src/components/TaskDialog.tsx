@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Priority, ProjectMember, Task, TaskInput, TaskStatus } from "../api";
-import { PRIORITY, TASK_COLUMNS } from "../labels";
+import { PRIORITY, TASK_COLUMNS, TASK_STATUS } from "../labels";
+import TaskWorkPanel from "./TaskWorkPanel";
 
 type Props = {
   task: Task | null; // null = new task
@@ -8,6 +9,7 @@ type Props = {
   onSave: (input: TaskInput) => Promise<void>;
   onDelete?: () => Promise<void>;
   onClose: () => void;
+  onChanged?: () => void;
 };
 
 const EMPTY: TaskInput = {
@@ -20,8 +22,9 @@ const EMPTY: TaskInput = {
   reviewer_id: null,
 };
 
-export default function TaskDialog({ task, members, onSave, onDelete, onClose }: Props) {
+export default function TaskDialog({ task, members, onSave, onDelete, onClose, onChanged }: Props) {
   const [values, setValues] = useState<TaskInput>(task ? { ...task } : EMPTY);
+  const [tab, setTab] = useState<"work" | "edit">(task && task.status !== "backlog" ? "work" : "edit");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -55,9 +58,25 @@ export default function TaskDialog({ task, members, onSave, onDelete, onClose }:
   }
 
   return (
-    <dialog ref={dialog} className="dialog" onClose={onClose} onCancel={onClose}>
-      <form className="form" onSubmit={submit}>
-        <h2>{task ? "タスクを編集" : "タスクを追加"}</h2>
+    <dialog ref={dialog} className="dialog wide" onClose={onClose} onCancel={onClose}>
+      {task && (
+        <div className="dialog-head">
+          <div>
+            <h2>{task.title}</h2>
+            <span className={`badge task-${task.status}`}>{TASK_STATUS[task.status]}</span>
+          </div>
+          <button type="button" className="btn" onClick={() => dialog.current?.close()} aria-label="閉じる">閉じる</button>
+        </div>
+      )}
+      {task && (
+        <nav className="tabs">
+          <button type="button" className={tab === "work" ? "active" : ""} onClick={() => setTab("work")}>作業</button>
+          <button type="button" className={tab === "edit" ? "active" : ""} onClick={() => setTab("edit")}>内容</button>
+        </nav>
+      )}
+      {task && tab === "work" && <TaskWorkPanel task={task} onChanged={() => onChanged?.()} />}
+      <form className="form" onSubmit={submit} hidden={!!task && tab !== "edit"}>
+        {!task && <h2>タスクを追加</h2>}
         <div className="field">
           <label htmlFor="task-title">タイトル</label>
           <input id="task-title" value={values.title} maxLength={200} required autoFocus
