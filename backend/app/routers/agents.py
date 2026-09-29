@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -9,7 +10,7 @@ from ..catalog import AGENT_TEMPLATES, AVATAR_COLORS
 from ..config import get_settings
 from ..db import get_session
 from ..llm_profiles import load_profiles
-from ..models import Agent, Project, ProjectMember, ProjectRole, Skill
+from ..models import Agent, AgentNote, Message, Project, ProjectMember, ProjectRole, Skill, Task, UsageRecord
 from ..schemas import AgentCreate, AgentOut, AgentTemplateOut, AgentUpdate, SkillOut
 
 router = APIRouter(prefix="/api", tags=["agents"])
@@ -103,6 +104,99 @@ def end_leave(agent_id: int, session: SessionDep) -> AgentOut:
     agent.leave_started_at = None
     session.commit()
     return agent
+
+
+# ---- growth: 業務メモ and track record ----
+
+NoteBody = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+
+
+class NoteOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    body: str
+    source: str
+    task_id: int | None
+    task_title: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class NoteIn(BaseModel):
+    body: NoteBody
+
+
+class AgentStats(BaseModel):
+    tasks_done: int
+    tasks_open: int
+    rejections: int
+    first_pass_rate: float | None
+    projects: int
+    notes: int
+    cost_usd: float
+
+
+@router.get("/agents/{agent_id}/notes")
+def list_notes(agent_id: int, session: SessionDep) -> list[NoteOut]:
+    agent = _get_or_404(session, agent_id)
+    titles = {t.id: t.title for t in session.scalars(select(Task).where(
+        Task.id.in_([n.task_id for n in agent.notes if n.task_id])))}
+    return [NoteOut.model_validate(n).model_copy(update={"task_title": titles.get(n.task_id)})
+            for n in reversed(agent.notes)]
+
+
+@router.post("/agents/{agent_id}/notes", status_code=status.HTTP_201_CREATED)
+def add_note(agent_id: int, body: NoteIn, session: SessionDep) -> NoteOut:
+    agent = _get_or_404(session, agent_id)
+    note = AgentNote(agent_id=agent.id, body=body.body, source="manager")
+    session.add(note)
+    session.commit()
+    return note
+
+
+@router.patch("/notes/{note_id}")
+def edit_note(note_id: int, body: NoteIn, session: SessionDep) -> NoteOut:
+    note = _get_note(session, note_id)
+    note.body = body.body
+    note.source = "manager"
+    session.commit()
+    return note
+
+
+@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_note(note_id: int, session: SessionDep) -> None:
+    session.delete(_get_note(session, note_id))
+    session.commit()
+
+
+@router.get("/agents/{agent_id}/stats")
+def agent_stats(agent_id: int, session: SessionDep) -> AgentStats:
+    agent = _get_or_404(session, agent_id)
+    done_ids = session.scalars(select(Task.id).where(Task.assignee_id == agent.id, Task.status == "done")).all()
+    open_count = session.scalar(select(func.count()).select_from(Task).where(
+        Task.assignee_id == agent.id, Task.status != "done")) or 0
+    rejected_tasks = set(session.scalars(select(Message.task_id).where(
+        Message.agent_id == agent.id, Message.sender == "manager", Message.kind == "review",
+        Message.body.contains("差し戻"), Message.task_id.is_not(None))).all())
+    rejections = session.scalar(select(func.count()).select_from(Message).where(
+        Message.agent_id == agent.id, Message.sender == "manager", Message.kind == "review",
+        Message.body.contains("差し戻"), Message.task_id.is_not(None))) or 0
+    first_pass = sum(1 for t in done_ids if t not in rejected_tasks)
+    cost = session.scalar(select(func.coalesce(func.sum(UsageRecord.cost_usd), 0)).where(
+        UsageRecord.agent_id == agent.id)) or 0
+    projects = session.scalar(select(func.count()).select_from(ProjectMember).where(
+        ProjectMember.agent_id == agent.id)) or 0
+    return AgentStats(tasks_done=len(done_ids), tasks_open=open_count, rejections=rejections,
+                      first_pass_rate=first_pass / len(done_ids) if done_ids else None, projects=projects,
+                      notes=len(agent.notes), cost_usd=float(cost))
+
+
+def _get_note(session: Session, note_id: int) -> AgentNote:
+    note = session.get(AgentNote, note_id)
+    if note is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "業務メモが見つかりません")
+    return note
 
 
 def _get_or_404(session: Session, agent_id: int) -> Agent:

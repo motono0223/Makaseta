@@ -82,6 +82,26 @@ export type Agent = {
   updated_at: string;
 };
 
+export type AgentNote = {
+  id: number;
+  body: string;
+  source: "reflection" | "manager";
+  task_id: number | null;
+  task_title: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentStats = {
+  tasks_done: number;
+  tasks_open: number;
+  rejections: number;
+  first_pass_rate: number | null;
+  projects: number;
+  notes: number;
+  cost_usd: number;
+};
+
 export type AgentInput = {
   name: string;
   title: string;
@@ -354,6 +374,11 @@ export const api = {
   agent: (id: number) => request<Agent>("GET", `/api/agents/${id}`),
   hireAgent: (input: AgentInput) => request<Agent>("POST", "/api/agents", input),
   updateAgent: (id: number, input: Partial<AgentInput>) => request<Agent>("PATCH", `/api/agents/${id}`, input),
+  notes: (agentId: number) => request<AgentNote[]>("GET", `/api/agents/${agentId}/notes`),
+  addNote: (agentId: number, body: string) => request<AgentNote>("POST", `/api/agents/${agentId}/notes`, { body }),
+  editNote: (noteId: number, body: string) => request<AgentNote>("PATCH", `/api/notes/${noteId}`, { body }),
+  deleteNote: (noteId: number) => request<void>("DELETE", `/api/notes/${noteId}`),
+  agentStats: (agentId: number) => request<AgentStats>("GET", `/api/agents/${agentId}/stats`),
   startLeave: (id: number) => request<Agent>("POST", `/api/agents/${id}/leave`),
   endLeave: (id: number) => request<Agent>("POST", `/api/agents/${id}/return`),
 

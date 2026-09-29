@@ -151,7 +151,8 @@ class UsageSummary(BaseModel):
 @router.get("/tasks/{task_id}/work")
 def task_work(task_id: int, session: SessionDep) -> TaskWork:
     task = _task(session, task_id)
-    runs = list(session.scalars(select(Run).where(Run.task_id == task.id).order_by(Run.id.desc())))
+    runs = list(session.scalars(select(Run).where(Run.task_id == task.id, Run.kind == "task")
+                                .order_by(Run.id.desc())))
     steps: dict[int, list[RunStep]] = {}
     if runs:
         for step in session.scalars(select(RunStep).where(RunStep.run_id.in_([r.id for r in runs]))
@@ -210,7 +211,7 @@ def retry(task_id: int, session: SessionDep, request: Request) -> RunOut:
     task = _task(session, task_id)
     if work.open_run(session, task) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "このタスクはすでに作業中です")
-    run = session.scalar(select(Run).where(Run.task_id == task.id).order_by(Run.id.desc()))
+    run = session.scalar(select(Run).where(Run.task_id == task.id, Run.kind == "task").order_by(Run.id.desc()))
     if run is None or run.status not in ("failed", "interrupted", "cancelled"):
         raise HTTPException(status.HTTP_409_CONFLICT, "再実行できる作業がありません")
     if task.assignee_id != run.agent_id:
@@ -369,7 +370,8 @@ def inbox(session: SessionDep) -> list[InboxItem]:
             items.append(item("review", task, "成果物の確認をお願いします", review.ended_at if review and review.ended_at
                               else task.updated_at, task.assignee_id))
         elif task.status == "in_progress" and run is None:
-            last = session.scalar(select(Run).where(Run.task_id == task.id).order_by(Run.id.desc()))
+            last = session.scalar(select(Run).where(Run.task_id == task.id, Run.kind == "task")
+                                  .order_by(Run.id.desc()))
             if last is not None and last.status in ("failed", "interrupted"):
                 items.append(item("failed", task, last.error, last.ended_at or task.updated_at, last.agent_id))
     for plan in session.scalars(select(Plan).where(Plan.status.in_(("drafting", "proposed")))):

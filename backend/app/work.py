@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from . import library
+from .config import get_settings
 from .models import Agent, Deliverable, Message, Plan, Project, Run, Task
 
 OPEN_RUN_STATUSES = ("queued", "running", "waiting")
@@ -41,13 +42,14 @@ def place_task(session: Session, task: Task, new_status: str, position: int | No
 
 
 def open_run(session: Session, task: Task) -> Run | None:
-    return session.scalar(select(Run).where(Run.task_id == task.id, Run.status.in_(OPEN_RUN_STATUSES))
-                          .order_by(Run.id.desc()))
+    return session.scalar(select(Run).where(Run.task_id == task.id, Run.kind == "task",
+                                            Run.status.in_(OPEN_RUN_STATUSES)).order_by(Run.id.desc()))
 
 
 def run_awaiting_review(session: Session, task: Task) -> Run | None:
-    return session.scalar(select(Run).where(Run.task_id == task.id, Run.status == "succeeded",
-                                            Run.pending_tool_use_id.is_not(None)).order_by(Run.id.desc()))
+    return session.scalar(select(Run).where(Run.task_id == task.id, Run.kind == "task", Run.status == "succeeded",
+                                            Run.pending_tool_use_id.is_not(None))
+                          .order_by(Run.id.desc()))
 
 
 def post(session: Session, *, sender: str, body: str, kind: str = "chat", agent_id: int | None = None,
@@ -131,6 +133,7 @@ def approve(session: Session, task: Task) -> list[Deliverable]:
         saved = "、".join(f"{d.room}/{d.path}" for d in drafts)
         post(session, sender="manager", kind="review", agent_id=task.assignee_id, project_id=task.project_id,
              task_id=task.id, body=f"タスク「{task.title}」を承認しました。" + (f"成果物を保存しました: {saved}" if saved else ""))
+        queue_reflection(session, task, "承認されました（このまま完了）", "")
     return drafts
 
 
@@ -147,6 +150,7 @@ def reject(session: Session, task: Task, comment: str) -> Run:
     _resume(review, f"オフィス長から差し戻されました。コメント: {comment}\n"
                     "指摘に対応し、必要なら成果物を提出し直してから、もう一度 finish で報告してください。")
     place_task(session, task, "in_progress")
+    queue_reflection(session, task, "差し戻されました（やり直し中）", comment)
     return review
 
 
@@ -350,3 +354,31 @@ def cancel_plan(session: Session, plan: Plan) -> None:
 def short_title(text: str, limit: int = 30) -> str:
     first = text.strip().splitlines()[0] if text.strip() else ""
     return first if len(first) <= limit else first[:limit] + "…"
+
+
+# ---- growth ----
+
+def queue_reflection(session: Session, task: Task, outcome: str, comment: str) -> None:
+    """Have the assignee look back on a reviewed task and keep what it learned (runs in the background)."""
+    if not get_settings().agent_reflection or task.assignee_id is None:
+        return
+    report = session.scalar(select(Message).where(Message.task_id == task.id, Message.sender == "agent",
+                                                  Message.kind == "report").order_by(Message.id.desc()))
+    earlier = session.scalars(select(Message.body).where(Message.task_id == task.id, Message.sender == "manager",
+                                                         Message.kind == "review", Message.body.contains("差し戻"))
+                              .order_by(Message.id)).all()
+    parts = [
+        "## 振り返る仕事",
+        f"タスク: {task.title}",
+        f"指示: {task.instructions or '（タイトルのとおり）'}",
+        f"期待する成果物: {task.expected_output or '（指定なし）'}",
+        "", "## あなたの報告", report.body if report else "（報告なし）",
+        "", "## オフィス長の判断", outcome,
+    ]
+    if comment:
+        parts.append(f"コメント: {comment}")
+    if earlier:
+        parts += ["", "## これまでの差し戻し", *[f"- {b}" for b in earlier]]
+    parts += ["", "この仕事から、次の仕事に活かせる学びがあれば save_notes で業務メモに残してください。"]
+    session.add(Run(kind="reflect", agent_id=task.assignee_id, project_id=task.project_id, task_id=task.id,
+                    transcript=[{"role": "user", "content": [{"type": "text", "text": "\n".join(parts)}]}]))

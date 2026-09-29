@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     max_concurrent_runs: int = 3
     monthly_budget_usd: float = 50.0
     max_steps_per_run: int = 40
+    # After each review the assignee reflects and keeps what it learned in its 業務メモ.
+    agent_reflection: bool = True
     embedding_model_profile: str = "embed-main"
 
 

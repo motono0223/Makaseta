@@ -77,6 +77,25 @@ class Agent(Base):
     )
 
     skills: Mapped[list[Skill]] = relationship(secondary=agent_skills, lazy="selectin", order_by=Skill.id)
+    notes: Mapped[list["AgentNote"]] = relationship(lazy="selectin", order_by="AgentNote.id",
+                                                    cascade="all, delete-orphan")
+
+
+class AgentNote(Base):
+    """業務メモ: something an agent learned on the job and carries into its next work."""
+
+    __tablename__ = "agent_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    # reflection: written by the agent after a review | manager: written or edited by the office head
+    source: Mapped[str] = mapped_column(String(16), default="reflection")
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class LibraryRoom(Base):
@@ -222,7 +241,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # task | plan | chat
+    # task | plan | chat | reflect
     kind: Mapped[str] = mapped_column(String(8), default="task")
     agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))

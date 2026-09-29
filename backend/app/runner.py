@@ -11,12 +11,15 @@ from . import work
 from .agent_tools import PAUSING, ToolContext, ToolFailure, describe_call, run_tool, tools_for
 from .config import get_settings
 from .llm import LLMError, Model, check_budget, open_model, record_usage
-from .models import Agent, Deliverable, Message, Plan, Project, Run, RunStep, Task
+from .models import Agent, AgentNote, Deliverable, Message, Plan, Project, Run, RunStep, Task
 from .work import post
 
 log = logging.getLogger(__name__)
 
 THREAD_HISTORY = 30
+NOTES_IN_PROMPT = 40
+MAX_NEW_NOTES = 3
+NOTE_LIMIT = 200
 LOG_TEXT_LIMIT = 4000
 PRIORITY_LABEL = {"high": "高", "normal": "中", "low": "低"}
 
@@ -31,6 +34,8 @@ def execute(session: Session, run_id: int) -> None:
             _reply_in_thread(session, run, agent)
         elif run.kind == "plan":
             _plan_request(session, run, agent)
+        elif run.kind == "reflect":
+            _reflect(session, run, agent)
         else:
             _work_on_task(session, run, agent)
     except LLMError as exc:
@@ -72,6 +77,10 @@ def persona(agent: Agent) -> str:
                   "次のスキルを使えます。使う作業の前に read_skill で手順書を読み、その手順に従います。"]
         for skill in package_skills:
             lines.append(f"- {skill.folder}: {skill.description}")
+    notes = agent.notes[-NOTES_IN_PROMPT:]
+    if notes:
+        lines += ["", "## 業務メモ（これまでの仕事で学んだこと。仕事の進め方に活かします）"]
+        lines += [f"- {n.body}" for n in notes]
     return "\n".join(lines)
 
 
@@ -354,6 +363,55 @@ def _inject_instructions(session: Session, run: Run, task: Task, messages: list)
          task_id=task.id, run_id=run.id, body="指示を受け取りました。作業に反映します。")
 
 
+# ---- growth ----
+
+REFLECT_RULES = """
+## 振り返り
+終わった仕事を振り返り、次の仕事に活かせる学びを業務メモに残します。
+- オフィス長の好みや基準、よく使う資料とその場所、指摘されたこと、うまくいった進め方などを、具体的に1文ずつ書きます。
+- その仕事だけにしか当てはまらないこと（特定の金額や日付など）は書きません。
+- すでに業務メモにあることは書きません。新しい学びがなければ、空の配列で save_notes を呼びます。
+- 多くても3件にします。
+""".strip()
+
+SAVE_NOTES = {
+    "name": "save_notes",
+    "description": "次の仕事に活かす学びを業務メモに追加する。",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "notes": {"type": "array", "items": {"type": "string"}, "description": "学び（1件1文、最大3件）"},
+        },
+        "required": ["notes"],
+    },
+}
+
+
+def _reflect(session: Session, run: Run, agent: Agent) -> None:
+    model = open_model(agent.model_profile)
+    check_budget(session)
+    run.started_at = work.now()
+    session.commit()
+    system = [{"type": "text", "text": persona(agent) + "\n\n" + REFLECT_RULES}]
+    response = model.create(system=system, tools=[SAVE_NOTES], messages=list(run.transcript))
+    _account(session, run, model, response, agent, None)
+    notes: list[str] = []
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "save_notes":
+            raw = (block.input or {}).get("notes") or []
+            notes = [str(n).strip()[:NOTE_LIMIT] for n in raw if str(n).strip()][:MAX_NEW_NOTES]
+    known = {n.body for n in agent.notes}
+    notes = [n for n in notes if n not in known]
+    for body in notes:
+        session.add(AgentNote(agent_id=agent.id, body=body, source="reflection", task_id=run.task_id))
+    if notes:
+        post(session, sender="system", kind="report", agent_id=agent.id, project_id=run.project_id,
+             task_id=run.task_id, run_id=run.id,
+             body="業務メモに学んだことを追記しました:\n" + "\n".join(f"- {n}" for n in notes))
+    run.status, run.ended_at = "succeeded", work.now()
+    session.commit()
+
+
 # ---- thread replies ----
 
 def _reply_in_thread(session: Session, run: Run, agent: Agent) -> None:
@@ -458,7 +516,8 @@ def _fail(session: Session, run: Run, agent: Agent | None, reason: str) -> None:
         agent = session.get(Agent, agent.id)
         agent.status = "error"
         task = session.get(Task, run.task_id) if run.task_id else None
-        what = f"タスク「{task.title}」の作業" if task else "計画づくり" if run.kind == "plan" else "返信"
+        what = ({"plan": "計画づくり", "reflect": "振り返り", "chat": "返信"}.get(run.kind)
+                or (f"タスク「{task.title}」の作業" if task else "作業"))
         post(session, sender="system", kind="report", agent_id=agent.id, project_id=run.project_id,
              task_id=run.task_id, run_id=run.id, body=f"{what}でエラーが起きました: {reason}")
     session.commit()

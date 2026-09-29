@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { Agent, AgentInput, Assignment, api } from "../api";
 import AgentForm from "../components/AgentForm";
+import AgentGrowth from "../components/AgentGrowth";
 import Avatar from "../components/Avatar";
 import StatusBadge from "../components/StatusBadge";
 import { useThread } from "../components/ThreadDrawer";
@@ -82,6 +83,8 @@ export default function StaffDetail() {
 
       {notice && <p className="status ok">{notice}</p>}
       {error && <p className="status bad">{error}</p>}
+
+      <AgentGrowth agentId={agentId} />
 
       <section className="card">
         <h2>プロフィール</h2>
