@@ -5,7 +5,7 @@ AI社員に仕事を任せる、あなただけの仮想オフィス。
 あなたはオフィス長です。LLMで動く「社員」を雇い、プロジェクトを立ち上げてアサインし、バックログのタスクを任せて、成果物を承認します。
 社員はプロジェクトにリンクされた「バケット」（共有の文書置き場）の資料を読み、成果物をバケットに保存します。
 
-> **English:** makaseta ("I'll leave it to you" in Japanese) is a self-hosted virtual office where you manage LLM agents as employees: hire them, assign them to project backlogs, and review their deliverables. Runs locally with Docker; supports AWS Bedrock (Claude), OpenAI, Gemini and DeepSeek.
+> **English:** makaseta ("I'll leave it to you" in Japanese) is a self-hosted virtual office where you manage LLM agents as employees: hire them, assign them to project backlogs, and review their deliverables. Runs locally with Docker; supports Claude (Anthropic API or AWS Bedrock), OpenAI, Gemini and DeepSeek.
 
 > 開発中です（フェーズ1: MVP）。現在は起動と設定確認の画面までできています。
 
@@ -16,7 +16,7 @@ AI社員に仕事を任せる、あなただけの仮想オフィス。
 - **マネージャー社員が窓口**: 依頼を分解して社員に割り振り、取りまとめる
 - **バケット**: SharePointのような文書置き場。プロジェクトごとに読み取り専用／読み書きでリンク
 - **ローカルで完結**: Docker Composeで起動し、データはすべて手元の `./data` に保存
-- **LLMを選べる**: AWS Bedrock（Claude）、OpenAI、Gemini、DeepSeek
+- **LLMを選べる**: Anthropic API・AWS Bedrock（Claude）、OpenAI、Gemini、DeepSeek
 
 ## 必要なもの
 
@@ -68,6 +68,7 @@ MAKASETA_BIND=0.0.0.0
 
 1. `.env` に認証情報を書きます（使うものだけ）。
    - Bedrock: ホストの `~/.aws` を読み取り専用でマウントします。場所が違う場合は `AWS_CONFIG_DIR` を設定します。`AWS_PROFILE` と `AWS_REGION` も確認してください。
+   - Anthropic API（Claudeを直接呼ぶ）: `ANTHROPIC_API_KEY` を設定します。既定のプロファイル `claude-main` はこれを使います（モデルは Claude Haiku 4.5）。
    - OpenAI / Gemini / DeepSeek: `OPENAI_API_KEY` などを設定します。
 2. `config/models.yaml` の `model` に、使うモデルのIDを書きます。
 3. 画面の「設定」で、各プロファイルが「利用可能」になっているか確認します。

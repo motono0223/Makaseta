@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     aws_region: str = "us-east-1"
     aws_access_key_id: str = ""
 
+    anthropic_api_key: str = ""
     openai_api_key: str = ""
     gemini_api_key: str = ""
     deepseek_api_key: str = ""

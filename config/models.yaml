@@ -2,15 +2,22 @@
 #
 # 社員はプロファイル名（claude-main など）で使うモデルを選びます。
 # model の値は、各サービスのコンソールやドキュメントで確認して書き換えてください。
-#   - Bedrock: モデルID または 推論プロファイルID（リージョンで使えるものを確認）
+#   - Anthropic API: Claude のモデルID（例: claude-haiku-4-5-20251001, claude-opus-5）
+#   - Bedrock: anthropic. で始まるモデルID（リージョンで使えるものを確認）
 #   - OpenAI / Gemini / DeepSeek: 各APIのモデル名
 # 認証情報（APIキーなど）はここには書かず、.env に書きます。
 
 profiles:
   claude-main:
+    label: Claude Haiku 4.5（Anthropic API）
+    provider: anthropic
+    model: claude-haiku-4-5-20251001
+    supports_tools: true
+
+  claude-bedrock:
     label: Claude（Bedrock）
     provider: bedrock
-    model: REPLACE_WITH_BEDROCK_MODEL_ID
+    model: anthropic.claude-opus-5
     supports_tools: true
 
   openai-main:

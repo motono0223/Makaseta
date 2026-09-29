@@ -30,6 +30,7 @@ def _credential_status(provider: str, settings: Settings) -> tuple[bool, str]:
             return True, ""
         return False, "AWSの認証情報が見つかりません（ホストで aws configure を実行してください）"
     keys = {
+        "anthropic": ("ANTHROPIC_API_KEY", settings.anthropic_api_key),
         "openai": ("OPENAI_API_KEY", settings.openai_api_key),
         "gemini": ("GEMINI_API_KEY", settings.gemini_api_key),
         "deepseek": ("DEEPSEEK_API_KEY", settings.deepseek_api_key),
