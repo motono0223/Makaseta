@@ -147,6 +147,26 @@ def update_agent(agent_id: int, body: AgentUpdate, session: SessionDep) -> Agent
     return agent
 
 
+class CloneIn(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=40)]
+    copy_notes: bool = True
+
+
+@router.post("/agents/{agent_id}/clone", status_code=status.HTTP_201_CREATED)
+def clone_agent(agent_id: int, body: CloneIn, session: SessionDep) -> AgentOut:
+    """Hire a new agent like an existing one: same role, persona, model and skills, optionally its 業務メモ too."""
+    source = _get_or_404(session, agent_id)
+    _check_unique_name(session, body.name)
+    agent = Agent(name=body.name, title=source.title, avatar_color=_next_color(session),
+                  personality=source.personality, instructions=source.instructions,
+                  model_profile=source.model_profile, template_key=source.template_key, skills=list(source.skills))
+    if body.copy_notes:
+        agent.notes = [AgentNote(body=n.body, source=n.source, task_id=n.task_id) for n in source.notes]
+    session.add(agent)
+    session.commit()
+    return agent
+
+
 @router.post("/agents/{agent_id}/leave")
 def start_leave(agent_id: int, session: SessionDep) -> AgentOut:
     agent = _get_or_404(session, agent_id)

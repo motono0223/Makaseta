@@ -219,6 +219,22 @@ export type TaskInput = {
   status?: TaskStatus;
 };
 
+export type ProjectDraft = {
+  name: string;
+  goal: string;
+  done_criteria: string;
+  members: { agent_id: number; role_id: number; is_primary: boolean; reason: string }[];
+  new_members: {
+    name: string;
+    title: string;
+    role_id: number;
+    template_key: string | null;
+    clone_of: number | null;
+    reason: string;
+  }[];
+  rooms: { room: string; access: "read" | "write"; reason: string }[];
+};
+
 export type Assignment = {
   project_id: number;
   project_name: string;
@@ -382,6 +398,9 @@ export const api = {
   agents: (includeOnLeave = false) =>
     request<Agent[]>("GET", `/api/agents${includeOnLeave ? "?include_on_leave=true" : ""}`),
   agent: (id: number) => request<Agent>("GET", `/api/agents/${id}`),
+  cloneAgent: (id: number, name: string, copyNotes: boolean) =>
+    request<Agent>("POST", `/api/agents/${id}/clone`, { name, copy_notes: copyNotes }),
+  projectDraft: (idea: string) => request<ProjectDraft>("POST", "/api/assist/project-draft", { idea }),
   suggestNames: (theme: string, title: string) =>
     request<{ name: string; note: string }[]>("POST", "/api/agents/suggest-names", { theme, title }),
   hireAgent: (input: AgentInput) => request<Agent>("POST", "/api/agents", input),

@@ -15,7 +15,7 @@ from .llm_profiles import ModelProfile, load_profiles
 from pydantic import BaseModel
 
 from . import auth, sandbox, skill_packages
-from .routers import agents, library, projects, skills, work
+from .routers import agents, assist, library, projects, skills, work
 from .worker import Worker
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -90,6 +90,7 @@ app.include_router(library.router)
 app.include_router(projects.router)
 app.include_router(work.router)
 app.include_router(skills.router)
+app.include_router(assist.router)
 
 
 @app.get("/api/health")

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Agent, LibraryRoom, MemberInput, ProjectInput, ProjectRole, RoomLink, api } from "../api";
 import MembersEditor from "../components/MembersEditor";
+import ProjectDraftHelper from "../components/ProjectDraftHelper";
 import ProjectFields from "../components/ProjectFields";
 import RoomsEditor from "../components/RoomsEditor";
 
@@ -52,6 +53,19 @@ export default function ProjectNew() {
         <Link to="/projects">プロジェクト</Link> / 立ち上げ
       </p>
       <h1>プロジェクトを立ち上げる</h1>
+      <ProjectDraftHelper
+        agents={agents}
+        roles={roles}
+        onDraft={(d) => {
+          setFields((f) => ({ ...f, name: d.name, goal: d.goal, done_criteria: d.done_criteria }));
+          setMembers(d.members.map(({ agent_id, role_id, is_primary }) => ({ agent_id, role_id, is_primary })));
+          setLinks(d.rooms.map(({ room, access }) => ({ room, access })));
+        }}
+        onHired={(agent, roleId) => {
+          setAgents((a) => [...a, agent]);
+          setMembers((m) => [...m, { agent_id: agent.id, role_id: roleId, is_primary: false }]);
+        }}
+      />
       <form className="form" onSubmit={submit}>
         <section className="card form">
           <h2>概要</h2>

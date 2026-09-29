@@ -1330,3 +1330,21 @@ dialog.dialog[open] {
   gap: 4px;
 }
 .msg-kind.kind-consult { background: #e7f5ee; color: var(--ok); }
+.draft-helper {
+  border-color: #c9dafb;
+  background: #f7faff;
+}
+.draft-helper .inline-form {
+  margin-bottom: 6px;
+}
+.draft-result ul {
+  margin: 8px 0;
+  padding-left: 1.2em;
+  display: grid;
+  gap: 4px;
+}
+.new-members {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}

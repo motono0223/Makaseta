@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { Agent, AgentInput, Assignment, api } from "../api";
 import AgentForm from "../components/AgentForm";
 import AgentGrowth from "../components/AgentGrowth";
@@ -11,6 +11,7 @@ import { PRIORITY, PROJECT_STATUS, TASK_STATUS } from "../labels";
 export default function StaffDetail() {
   const { id } = useParams();
   const agentId = Number(id);
+  const navigate = useNavigate();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -40,6 +41,19 @@ export default function StaffDetail() {
     const updated = await api.updateAgent(agentId, values);
     setAgent(updated);
     setNotice("保存しました");
+  }
+
+  async function cloneThis() {
+    if (!agent) return;
+    const name = window.prompt(`${agent.name}さんを複製します。新しい社員の名前を入力してください。`, `${agent.name}2`);
+    if (!name?.trim()) return;
+    const copyNotes = window.confirm(`${agent.name}さんの業務メモ（経験）も引き継ぎますか？\n［OK］引き継ぐ ／［キャンセル］引き継がない`);
+    try {
+      const copy = await api.cloneAgent(agent.id, name.trim(), copyNotes);
+      navigate(`/staff/${copy.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   async function toggleLeave() {
@@ -75,6 +89,7 @@ export default function StaffDetail() {
         </div>
         <div className="header-actions">
           {agent.active && <button type="button" className="btn primary" onClick={() => openThread(agent.id)}>💬 スレッドを開く</button>}
+          <button type="button" className="btn" onClick={cloneThis}>複製する</button>
           <button type="button" className={agent.active ? "btn" : "btn primary"} onClick={toggleLeave}>
             {agent.active ? "休暇を取らせる" : "休暇から復帰させる"}
           </button>
