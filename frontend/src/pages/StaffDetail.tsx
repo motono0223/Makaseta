@@ -41,13 +41,15 @@ export default function StaffDetail() {
     setNotice("保存しました");
   }
 
-  async function toggleEmployment() {
+  async function toggleLeave() {
     if (!agent) return;
     setError(null);
     setNotice(null);
-    if (agent.active && !window.confirm(`${agent.name}さんを退職させますか？これまでの作業記録は残ります。`)) return;
+    if (agent.active && !window.confirm(
+      `${agent.name}さんに休暇を取らせますか？\n休暇中は新しい仕事を任せられませんが、経験や作業の記録はそのまま残り、いつでも復帰できます。`,
+    )) return;
     try {
-      setAgent(agent.active ? await api.retireAgent(agentId) : await api.rehireAgent(agentId));
+      setAgent(agent.active ? await api.startLeave(agentId) : await api.endLeave(agentId));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -72,8 +74,8 @@ export default function StaffDetail() {
         </div>
         <div className="header-actions">
           {agent.active && <button type="button" className="btn primary" onClick={() => openThread(agent.id)}>💬 スレッドを開く</button>}
-          <button type="button" className={agent.active ? "btn danger" : "btn"} onClick={toggleEmployment}>
-            {agent.active ? "退職させる" : "再雇用する"}
+          <button type="button" className={agent.active ? "btn" : "btn primary"} onClick={toggleLeave}>
+            {agent.active ? "休暇を取らせる" : "休暇から復帰させる"}
           </button>
         </div>
       </div>

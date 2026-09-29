@@ -193,6 +193,10 @@ def on_status_change(session: Session, task: Task, old: str, new: str) -> None:
     if old == new:
         return
     if new == "in_progress":
+        assignee = session.get(Agent, task.assignee_id) if task.assignee_id else None
+        if assignee is not None and not assignee.active:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"{assignee.name}さんは休暇中です。復帰させるか、担当者を変えてください")
         start_task(session, task)
     elif new == "done":
         approve(session, task)
@@ -214,6 +218,9 @@ def start_ready_dependents(session: Session, finished: Task) -> None:
     session.flush()
     for task in session.scalars(select(Task).where(Task.project_id == finished.project_id,
                                                    Task.status == "backlog", Task.assignee_id.is_not(None))):
+        assignee = session.get(Agent, task.assignee_id)
+        if assignee is None or not assignee.active:
+            continue  # waits in the backlog until the assignee is back or someone else takes it
         if finished.id in (task.depends_on or []) and ready(session, task):
             place_task(session, task, "in_progress")
             start_task(session, task)
@@ -311,7 +318,8 @@ def approve_plan(session: Session, plan: Plan) -> list[Task]:
     post(session, sender="manager", kind="review", agent_id=plan.agent_id, project_id=project.id,
          body=f"計画を承認しました（タスク{len(created)}件）。")
     for task in created:
-        if not task.depends_on:
+        assignee = session.get(Agent, task.assignee_id)
+        if not task.depends_on and assignee is not None and assignee.active:
             place_task(session, task, "in_progress")
             start_task(session, task)
     return created

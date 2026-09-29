@@ -67,8 +67,9 @@ class Agent(Base):
     model_profile: Mapped[str] = mapped_column(String(64))
     # idle | working | error
     status: Mapped[str] = mapped_column(String(16), default="idle")
+    # False while the agent is on leave: no new work, but experience and history stay.
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    leave_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     template_key: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -75,7 +75,7 @@ export type Agent = {
   model_profile: string;
   status: AgentStatus;
   active: boolean;
-  retired_at: string | null;
+  leave_started_at: string | null;
   template_key: string | null;
   skills: Skill[];
   created_at: string;
@@ -349,13 +349,13 @@ export const api = {
   discardSkill: (stageId: string) => request<void>("DELETE", `/api/skills/import/${stageId}`),
   deleteSkill: (id: number) => request<void>("DELETE", `/api/skills/${id}`),
   agentTemplates: () => request<AgentTemplate[]>("GET", "/api/agent-templates"),
-  agents: (includeRetired = false) =>
-    request<Agent[]>("GET", `/api/agents${includeRetired ? "?include_retired=true" : ""}`),
+  agents: (includeOnLeave = false) =>
+    request<Agent[]>("GET", `/api/agents${includeOnLeave ? "?include_on_leave=true" : ""}`),
   agent: (id: number) => request<Agent>("GET", `/api/agents/${id}`),
   hireAgent: (input: AgentInput) => request<Agent>("POST", "/api/agents", input),
   updateAgent: (id: number, input: Partial<AgentInput>) => request<Agent>("PATCH", `/api/agents/${id}`, input),
-  retireAgent: (id: number) => request<Agent>("POST", `/api/agents/${id}/retire`),
-  rehireAgent: (id: number) => request<Agent>("POST", `/api/agents/${id}/rehire`),
+  startLeave: (id: number) => request<Agent>("POST", `/api/agents/${id}/leave`),
+  endLeave: (id: number) => request<Agent>("POST", `/api/agents/${id}/return`),
 
   libraryStatus: () => request<LibraryStatus>("GET", "/api/library/status"),
   rescanLibrary: () => request<Record<string, number>>("POST", "/api/library/rescan"),

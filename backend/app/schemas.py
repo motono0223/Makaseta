@@ -42,7 +42,7 @@ class AgentOut(BaseModel):
     model_profile: str
     status: str
     active: bool
-    retired_at: datetime | None
+    leave_started_at: datetime | None
     template_key: str | None
     skills: list[SkillOut]
     created_at: datetime

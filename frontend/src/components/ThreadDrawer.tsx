@@ -137,7 +137,7 @@ function ThreadDrawer({ agentId, onClose }: { agentId: number; onClose: () => vo
           />
           <div className="form-actions">
             <button type="submit" className="btn primary" disabled={sending || !text.trim() || !agent?.active}>送信</button>
-            {agent && !agent.active && <span className="muted small">退職した社員には送れません</span>}
+            {agent && !agent.active && <span className="muted small">休暇中の社員には送れません（復帰させると話せます）</span>}
           </div>
         </form>
       </aside>

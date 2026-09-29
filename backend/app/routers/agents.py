@@ -27,9 +27,9 @@ def list_skills(session: SessionDep) -> list[SkillOut]:
 
 
 @router.get("/agents")
-def list_agents(session: SessionDep, include_retired: bool = False) -> list[AgentOut]:
+def list_agents(session: SessionDep, include_on_leave: bool = False) -> list[AgentOut]:
     query = select(Agent).order_by(Agent.active.desc(), Agent.id)
-    if not include_retired:
+    if not include_on_leave:
         query = query.where(Agent.active.is_(True))
     return list(session.scalars(query))
 
@@ -76,30 +76,31 @@ def update_agent(agent_id: int, body: AgentUpdate, session: SessionDep) -> Agent
     return agent
 
 
-@router.post("/agents/{agent_id}/retire")
-def retire_agent(agent_id: int, session: SessionDep) -> AgentOut:
+@router.post("/agents/{agent_id}/leave")
+def start_leave(agent_id: int, session: SessionDep) -> AgentOut:
     agent = _get_or_404(session, agent_id)
     if agent.status == "working":
-        raise HTTPException(status.HTTP_409_CONFLICT, "作業中の社員は退職させられません。作業が終わってから操作してください")
+        raise HTTPException(status.HTTP_409_CONFLICT, "作業中の社員は休暇に入れません。作業が終わってから操作してください")
     sole = _projects_where_sole_manager(session, agent.id)
     if sole:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"{agent.name}さんはプロジェクト「{'」「'.join(sole)}」の唯一のマネージャーです。先に別のマネージャーをアサインしてください",
+            f"{agent.name}さんはプロジェクト「{'」「'.join(sole)}」の唯一のマネージャーです。"
+            "休暇の間の窓口として、先に別のマネージャーをアサインしてください",
         )
     agent.active = False
-    agent.retired_at = datetime.now(timezone.utc)
+    agent.leave_started_at = datetime.now(timezone.utc)
     agent.status = "idle"
     session.commit()
     return agent
 
 
-@router.post("/agents/{agent_id}/rehire")
-def rehire_agent(agent_id: int, session: SessionDep) -> AgentOut:
+@router.post("/agents/{agent_id}/return")
+def end_leave(agent_id: int, session: SessionDep) -> AgentOut:
     agent = _get_or_404(session, agent_id)
     _check_unique_name(session, agent.name, exclude_id=agent.id)
     agent.active = True
-    agent.retired_at = None
+    agent.leave_started_at = None
     session.commit()
     return agent
 

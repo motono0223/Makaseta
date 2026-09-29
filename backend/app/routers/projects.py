@@ -386,7 +386,7 @@ def _set_members(session: Session, project: Project, members: list[MemberIn]) ->
         if agent is None:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"社員（ID {m.agent_id}）が見つかりません")
         if not agent.active and m.agent_id not in current:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{agent.name}さんは退職しています")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{agent.name}さんは休暇中です")
         if m.role_id not in roles:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"ロール（ID {m.role_id}）が見つかりません")
 

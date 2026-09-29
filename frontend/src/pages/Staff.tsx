@@ -36,7 +36,7 @@ export default function Staff() {
 
       <label className="toggle">
         <input type="checkbox" checked={showRetired} onChange={(e) => setShowRetired(e.target.checked)} />
-        退職した社員も表示
+        休暇中の社員も表示
       </label>
 
       {error && <p className="status bad">読み込みに失敗しました: {error}</p>}
@@ -51,7 +51,7 @@ export default function Staff() {
 
       <div className="agent-grid">
         {agents?.map((a) => (
-          <Link key={a.id} to={`/staff/${a.id}`} className={`agent-card${a.active ? "" : " retired"}`}>
+          <Link key={a.id} to={`/staff/${a.id}`} className={`agent-card${a.active ? "" : " on-leave"}`}>
             <div className="agent-card-head">
               <Avatar name={a.name} color={a.avatar_color} />
               <div className="grow">

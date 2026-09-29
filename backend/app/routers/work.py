@@ -262,7 +262,7 @@ def message_agent(agent_id: int, body: AgentMessageIn, session: SessionDep, requ
     if agent is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "社員が見つかりません")
     if not agent.active:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"{agent.name}さんは退職しています")
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{agent.name}さんは休暇中です")
     message = work.talk_to_agent(session, agent, body.body, body.answer_run_id)
     session.commit()
     _wake(request)
