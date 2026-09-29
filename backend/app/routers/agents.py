@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..catalog import AGENT_TEMPLATES, AVATAR_COLORS
 from ..config import get_settings
 from ..db import get_session
+from ..llm import LLMError, check_budget, open_model, record_usage
 from ..llm_profiles import load_profiles
 from ..models import Agent, AgentNote, Message, Project, ProjectMember, ProjectRole, Skill, Task, UsageRecord
 from ..schemas import AgentCreate, AgentOut, AgentTemplateOut, AgentUpdate, SkillOut
@@ -25,6 +26,75 @@ def list_templates() -> list[AgentTemplateOut]:
 @router.get("/skills")
 def list_skills(session: SessionDep) -> list[SkillOut]:
     return list(session.scalars(select(Skill).order_by(Skill.builtin.desc(), Skill.id)))
+
+
+class NameRequest(BaseModel):
+    theme: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
+    title: str = ""
+    count: int = 6
+
+
+class NameIdea(BaseModel):
+    name: str
+    note: str = ""
+
+
+SUGGEST_NAMES = {
+    "name": "suggest_names",
+    "description": "社員の名前の候補を返す。",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "names": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "名前（40文字以内）"},
+                        "note": {"type": "string", "description": "由来やイメージを一言"},
+                    },
+                    "required": ["name"],
+                },
+            },
+        },
+        "required": ["names"],
+    },
+}
+
+
+@router.post("/agents/suggest-names")
+def suggest_names(body: NameRequest, session: SessionDep) -> list[NameIdea]:
+    """Name ideas for a new agent from a theme such as a family or a story's characters."""
+    taken = [a.name for a in session.scalars(select(Agent).where(Agent.active.is_(True)))]
+    count = min(max(body.count, 1), 12)
+    try:
+        check_budget(session)
+        model = open_model(get_settings().default_model_profile)
+        response = model.create(
+            system="あなたは仮想オフィスの社員（AIエージェント）に名前を付ける手伝いをします。"
+                   "テーマに沿った、呼びやすい名前を考え、suggest_names で返します。",
+            tools=[SUGGEST_NAMES],
+            messages=[{"role": "user", "content": (
+                f"テーマ: {body.theme}\n"
+                f"役職: {body.title or '（未定）'}\n"
+                f"すでにいる社員（重ならないように）: {'、'.join(taken) or 'なし'}\n"
+                f"候補を{count}個考えてください。役職に合いそうな順に並べ、各候補に一言の由来を添えてください。"
+            )}],
+        )
+        record_usage(session, model, response, agent_id=None, project_id=None, task_id=None, run_id=None)
+        session.commit()
+    except LLMError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+    ideas: list[NameIdea] = []
+    for block in response.content:
+        if block.type == "tool_use" and block.name == "suggest_names":
+            for item in (block.input or {}).get("names") or []:
+                name = str(item.get("name", "")).strip()[:40]
+                if name and name not in taken and all(i.name != name for i in ideas):
+                    ideas.append(NameIdea(name=name, note=str(item.get("note", "")).strip()[:100]))
+    if not ideas:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "名前の候補を作れませんでした。テーマを変えて試してください")
+    return ideas[:count]
 
 
 @router.get("/agents")

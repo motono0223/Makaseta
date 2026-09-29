@@ -372,6 +372,8 @@ export const api = {
   agents: (includeOnLeave = false) =>
     request<Agent[]>("GET", `/api/agents${includeOnLeave ? "?include_on_leave=true" : ""}`),
   agent: (id: number) => request<Agent>("GET", `/api/agents/${id}`),
+  suggestNames: (theme: string, title: string) =>
+    request<{ name: string; note: string }[]>("POST", "/api/agents/suggest-names", { theme, title }),
   hireAgent: (input: AgentInput) => request<Agent>("POST", "/api/agents", input),
   updateAgent: (id: number, input: Partial<AgentInput>) => request<Agent>("PATCH", `/api/agents/${id}`, input),
   notes: (agentId: number) => request<AgentNote[]>("GET", `/api/agents/${agentId}/notes`),

@@ -1285,3 +1285,41 @@ dialog.dialog[open] {
   font-size: 14px;
   overflow-wrap: anywhere;
 }
+
+/* ---- name ideas ---- */
+.namer {
+  display: grid;
+  gap: 8px;
+  margin-top: -8px;
+}
+.namer-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: #f7f9fc;
+  border-radius: 8px;
+}
+.namer-panel .inline-form {
+  margin-bottom: 0;
+}
+.name-ideas {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+.name-idea {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.name-idea:hover,
+.name-idea.selected {
+  border-color: var(--sidebar-active);
+  background: #eef4ff;
+}

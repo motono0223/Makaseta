@@ -14,6 +14,10 @@ export default function AgentForm({ initial, submitLabel, onSubmit, onCancel }: 
   const [skills, setSkills] = useState<Skill[]>([]);
   const [profiles, setProfiles] = useState<ModelProfile[]>([]);
   const [saving, setSaving] = useState(false);
+  const [namer, setNamer] = useState(false);
+  const [theme, setTheme] = useState("");
+  const [ideas, setIdeas] = useState<{ name: string; note: string }[]>([]);
+  const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => setValues(initial), [initial]);
@@ -36,6 +40,19 @@ export default function AgentForm({ initial, submitLabel, onSubmit, onCancel }: 
     );
 
   const selectedProfile = profiles.find((p) => p.name === values.model_profile);
+
+  async function suggest() {
+    if (!theme.trim()) return;
+    setThinking(true);
+    setError(null);
+    try {
+      setIdeas(await api.suggestNames(theme, values.title));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setThinking(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -75,6 +92,40 @@ export default function AgentForm({ initial, submitLabel, onSubmit, onCancel }: 
             placeholder="例: リサーチャー"
           />
         </div>
+      </div>
+
+      <div className="namer">
+        <button type="button" className="link-button small" onClick={() => setNamer((v) => !v)}>
+          ✨ AIで名前を考える
+        </button>
+        {namer && (
+          <div className="namer-panel">
+            <div className="inline-form">
+              <input value={theme} onChange={(e) => setTheme(e.target.value)} maxLength={200}
+                placeholder="テーマ（例: サザエさんの家族 / ハリー・ポッターの登場人物 / 戦国武将）" aria-label="名前のテーマ"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    suggest();
+                  }
+                }} />
+              <button type="button" className="btn" disabled={thinking || !theme.trim()} onClick={suggest}>
+                {thinking ? "考えています…" : "候補を出す"}
+              </button>
+            </div>
+            {ideas.length > 0 && (
+              <div className="name-ideas">
+                {ideas.map((idea) => (
+                  <button key={idea.name} type="button" className={`name-idea${values.name === idea.name ? " selected" : ""}`}
+                    onClick={() => set("name", idea.name)} title={idea.note}>
+                    <strong>{idea.name}</strong>
+                    {idea.note && <span className="muted small">{idea.note}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="field">
