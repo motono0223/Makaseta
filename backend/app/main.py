@@ -6,12 +6,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 
 from . import __version__
-from .catalog import seed_builtin_skills
+from .catalog import seed_builtin_roles, seed_builtin_skills
 from .config import get_settings
 from .db import check_database, run_migrations, session_factory
 from .library import Scanner
 from .llm_profiles import ModelProfile, load_profiles
-from .routers import agents, library
+from .routers import agents, library, projects
 
 
 @asynccontextmanager
@@ -19,6 +19,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     run_migrations()
     with session_factory()() as session:
         seed_builtin_skills(session)
+        seed_builtin_roles(session)
     get_settings().library_root.mkdir(parents=True, exist_ok=True)
     app.state.scanner = Scanner(session_factory, get_settings().library_scan_interval)
     app.state.scanner.start()
@@ -29,6 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="makaseta", version=__version__, lifespan=lifespan)
 app.include_router(agents.router)
 app.include_router(library.router)
+app.include_router(projects.router)
 
 
 @app.get("/api/health")

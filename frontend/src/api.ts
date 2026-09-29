@@ -104,6 +104,79 @@ export type LibraryStatus = {
   documents: number;
 };
 
+export type ProjectStatus = "planning" | "active" | "paused" | "done" | "archived";
+export type TaskStatus = "backlog" | "in_progress" | "waiting" | "review" | "done";
+export type Priority = "high" | "normal" | "low";
+
+export type ProjectRole = { id: number; key: string | null; name: string; description: string; is_manager: boolean };
+export type AgentBrief = Pick<Agent, "id" | "name" | "title" | "avatar_color" | "status" | "active">;
+export type ProjectMember = { agent: AgentBrief; role: ProjectRole; is_primary: boolean };
+export type RoomLink = { room: string; access: "read" | "write"; exists?: boolean };
+
+export type Project = {
+  id: number;
+  name: string;
+  goal: string;
+  done_criteria: string;
+  due_date: string | null;
+  status: ProjectStatus;
+  require_plan_approval: boolean;
+  members: ProjectMember[];
+  rooms: RoomLink[];
+  task_counts: Partial<Record<TaskStatus, number>>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectInput = {
+  name: string;
+  goal: string;
+  done_criteria: string;
+  due_date: string | null;
+  status?: ProjectStatus;
+  require_plan_approval: boolean;
+};
+
+export type MemberInput = { agent_id: number; role_id: number; is_primary: boolean };
+
+export type Task = {
+  id: number;
+  project_id: number;
+  title: string;
+  instructions: string;
+  expected_output: string;
+  status: TaskStatus;
+  priority: Priority;
+  due_date: string | null;
+  assignee_id: number | null;
+  reviewer_id: number | null;
+  requested_by_agent_id: number | null;
+  rank: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+};
+
+export type TaskInput = {
+  title: string;
+  instructions: string;
+  expected_output: string;
+  priority: Priority;
+  due_date: string | null;
+  assignee_id: number | null;
+  reviewer_id: number | null;
+  status?: TaskStatus;
+};
+
+export type Assignment = {
+  project_id: number;
+  project_name: string;
+  project_status: ProjectStatus;
+  role: ProjectRole;
+  is_primary: boolean;
+  tasks: Task[];
+};
+
 export class ApiError extends Error {}
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -178,6 +251,25 @@ export const api = {
     files.forEach((f) => form.append("files", f));
     return request<LibraryEntry[]>("POST", `${room(roomName)}/upload`, form);
   },
+  projectRoles: () => request<ProjectRole[]>("GET", "/api/project-roles"),
+  projects: (includeArchived = false) =>
+    request<Project[]>("GET", `/api/projects${includeArchived ? "?include_archived=true" : ""}`),
+  project: (id: number) => request<Project>("GET", `/api/projects/${id}`),
+  createProject: (input: ProjectInput & { members: MemberInput[]; rooms: RoomLink[] }) =>
+    request<Project>("POST", "/api/projects", input),
+  updateProject: (id: number, input: Partial<ProjectInput>) => request<Project>("PATCH", `/api/projects/${id}`, input),
+  setMembers: (id: number, members: MemberInput[]) => request<Project>("PUT", `/api/projects/${id}/members`, members),
+  setRooms: (id: number, rooms: RoomLink[]) =>
+    request<Project>("PUT", `/api/projects/${id}/rooms`, rooms.map(({ room, access }) => ({ room, access }))),
+  deleteProject: (id: number) => request<void>("DELETE", `/api/projects/${id}`),
+  tasks: (projectId: number) => request<Task[]>("GET", `/api/projects/${projectId}/tasks`),
+  createTask: (projectId: number, input: TaskInput) => request<Task>("POST", `/api/projects/${projectId}/tasks`, input),
+  updateTask: (id: number, input: Partial<TaskInput>) => request<Task>("PATCH", `/api/tasks/${id}`, input),
+  moveTask: (id: number, status: TaskStatus, position: number) =>
+    request<Task>("POST", `/api/tasks/${id}/move`, { status, position }),
+  deleteTask: (id: number) => request<void>("DELETE", `/api/tasks/${id}`),
+  assignments: (agentId: number) => request<Assignment[]>("GET", `/api/agents/${agentId}/assignments`),
+
   search: (text: string, roomName?: string) =>
     request<SearchHit[]>("GET", `/api/library/search?${q(roomName ? { q: text, room: roomName } : { q: text })}`),
 };

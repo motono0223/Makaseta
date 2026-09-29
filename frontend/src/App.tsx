@@ -7,6 +7,9 @@ import HireStaff from "./pages/HireStaff";
 import StaffDetail from "./pages/StaffDetail";
 import Library from "./pages/Library";
 import LibraryRoom from "./pages/LibraryRoom";
+import Projects from "./pages/Projects";
+import ProjectNew from "./pages/ProjectNew";
+import ProjectDetail from "./pages/ProjectDetail";
 
 const NAV = [
   { to: "/", label: "オフィスホーム", end: true },
@@ -39,7 +42,9 @@ export default function App() {
           <Route path="/staff" element={<Staff />} />
           <Route path="/staff/new" element={<HireStaff />} />
           <Route path="/staff/:id" element={<StaffDetail />} />
-          <Route path="/projects" element={<ComingSoon title="プロジェクト" what="プロジェクト、ロール、バックログとカンバン" />} />
+          <Route path="/projects" element={<Projects />} />
+          <Route path="/projects/new" element={<ProjectNew />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/library" element={<Library />} />
           <Route path="/library/:room/*" element={<LibraryRoom />} />
           <Route path="/inbox" element={<ComingSoon title="受信箱" what="質問・レビュー待ち・エラーの通知" />} />

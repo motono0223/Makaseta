@@ -9,7 +9,7 @@ from ..catalog import AGENT_TEMPLATES, AVATAR_COLORS
 from ..config import get_settings
 from ..db import get_session
 from ..llm_profiles import load_profiles
-from ..models import Agent, Skill
+from ..models import Agent, Project, ProjectMember, ProjectRole, Skill
 from ..schemas import AgentCreate, AgentOut, AgentTemplateOut, AgentUpdate, SkillOut
 
 router = APIRouter(prefix="/api", tags=["agents"])
@@ -81,6 +81,12 @@ def retire_agent(agent_id: int, session: SessionDep) -> AgentOut:
     agent = _get_or_404(session, agent_id)
     if agent.status == "working":
         raise HTTPException(status.HTTP_409_CONFLICT, "作業中の社員は退職させられません。作業が終わってから操作してください")
+    sole = _projects_where_sole_manager(session, agent.id)
+    if sole:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"{agent.name}さんはプロジェクト「{'」「'.join(sole)}」の唯一のマネージャーです。先に別のマネージャーをアサインしてください",
+        )
     agent.active = False
     agent.retired_at = datetime.now(timezone.utc)
     agent.status = "idle"
@@ -131,3 +137,13 @@ def _load_skills(session: Session, skill_ids: list[int]) -> list[Skill]:
 def _next_color(session: Session) -> str:
     count = session.scalar(select(func.count()).select_from(Agent)) or 0
     return AVATAR_COLORS[count % len(AVATAR_COLORS)]
+
+
+def _projects_where_sole_manager(session: Session, agent_id: int) -> list[str]:
+    managed = session.scalars(
+        select(Project)
+        .join(ProjectMember)
+        .join(ProjectRole)
+        .where(ProjectMember.agent_id == agent_id, ProjectRole.is_manager.is_(True), Project.status != "archived")
+    )
+    return [p.name for p in managed if sum(1 for m in p.members if m.role.is_manager and m.agent.active) == 1]

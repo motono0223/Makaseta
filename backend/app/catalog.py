@@ -7,7 +7,7 @@ Templates stay in code: they are only starting points for the hire form.
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import Skill
+from .models import ProjectRole, Skill
 
 AVATAR_COLORS = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"]
 
@@ -46,6 +46,33 @@ BUILTIN_SKILLS = [
         "description": "依頼を具体的なタスクに分け、担当を割り振る",
         "instructions": "依頼のゴールと完了条件を確認し、1人が一度に終えられる大きさのタスクに分ける。各タスクに期待する成果物とロールを書く。",
         "tools": ["update_task", "send_message"],
+    },
+]
+
+BUILTIN_ROLES = [
+    {
+        "key": "manager",
+        "name": "マネージャー",
+        "description": "オフィス長の窓口。依頼をタスクに分解して社員に割り振り、成果物を取りまとめて報告する",
+        "is_manager": True,
+    },
+    {
+        "key": "researcher",
+        "name": "調査担当",
+        "description": "資料室や情報源を調べ、根拠付きで要点をまとめる",
+        "is_manager": False,
+    },
+    {
+        "key": "writer",
+        "name": "資料作成者",
+        "description": "調査結果をもとに報告書や資料を作る",
+        "is_manager": False,
+    },
+    {
+        "key": "reviewer",
+        "name": "レビュアー",
+        "description": "成果物を確認し、誤りや抜け漏れを指摘する",
+        "is_manager": False,
     },
 ]
 
@@ -108,4 +135,16 @@ def seed_builtin_skills(session: Session) -> None:
             continue
         for field in ("name", "description", "instructions", "tools"):
             setattr(skill, field, spec[field])
+    session.commit()
+
+
+def seed_builtin_roles(session: Session) -> None:
+    existing = {r.key: r for r in session.scalars(select(ProjectRole).where(ProjectRole.builtin.is_(True)))}
+    for spec in BUILTIN_ROLES:
+        role = existing.get(spec["key"])
+        if role is None:
+            session.add(ProjectRole(builtin=True, **spec))
+            continue
+        for field in ("name", "description", "is_manager"):
+            setattr(role, field, spec[field])
     session.commit()

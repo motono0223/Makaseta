@@ -538,3 +538,233 @@ a:hover {
 .file-table td:not(:first-child) {
   white-space: nowrap;
 }
+
+/* ---- projects ---- */
+.content:has(.kanban) {
+  max-width: none;
+}
+.avatar-stack {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.avatar-stack .muted {
+  margin-left: 8px;
+}
+.progress {
+  height: 6px;
+  background: #eef1f5;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.progress-bar {
+  height: 100%;
+  background: var(--ok);
+}
+.project-planning { background: #eef1f5; color: var(--muted); }
+.project-active { background: #e6efff; color: #2559b8; }
+.project-paused { background: #fff4e0; color: #b7791f; }
+.project-done { background: #e7f5ee; color: var(--ok); }
+.project-archived { background: #eef1f5; color: var(--muted); }
+.task-backlog { background: #eef1f5; color: var(--muted); }
+.task-in_progress { background: #e6efff; color: #2559b8; }
+.task-waiting { background: #fff4e0; color: #b7791f; }
+.task-review { background: #f3ecff; color: #7048c8; }
+.task-done { background: #e7f5ee; color: var(--ok); }
+.members-editor {
+  display: grid;
+  gap: 8px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.member-row select,
+.add-member,
+.status-select {
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.add-member {
+  justify-self: start;
+}
+.primary-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+.primary-toggle.hidden {
+  visibility: hidden;
+}
+.small-icon {
+  font-size: 20px;
+}
+.form-actions.spaced {
+  margin-top: 12px;
+}
+.member-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.member-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+.member-chip:hover {
+  border-color: var(--sidebar-active);
+  text-decoration: none;
+}
+.room-chip {
+  padding-left: 10px;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.tabs button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.tabs button.active {
+  color: var(--text);
+  border-bottom-color: var(--sidebar-active);
+  font-weight: 600;
+}
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(200px, 1fr));
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.kanban-column {
+  background: #eceff3;
+  border-radius: 10px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 200px;
+}
+.kanban-column.drop-target {
+  outline: 2px dashed var(--sidebar-active);
+  outline-offset: -2px;
+}
+.kanban-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 4px;
+}
+.task-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: grab;
+  display: grid;
+  gap: 8px;
+}
+.task-card:hover,
+.task-card:focus {
+  border-color: var(--sidebar-active);
+  outline: none;
+}
+.task-card.dragging {
+  opacity: 0.4;
+}
+.task-card.insert-before {
+  box-shadow: 0 -3px 0 var(--sidebar-active);
+}
+.task-title {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.task-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.push-right {
+  margin-left: auto;
+}
+.priority-high { background: #fdecea; color: var(--bad); }
+.priority-low { background: #eef1f5; color: var(--muted); }
+.add-task {
+  background: none;
+  border: 1px dashed #b9c0ca;
+  border-radius: 8px;
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.add-task:hover {
+  color: var(--text);
+  border-color: var(--sidebar-active);
+}
+.dialog {
+  border: none;
+  border-radius: 12px;
+  padding: 20px 22px;
+  width: min(640px, calc(100vw - 32px));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
+}
+.dialog::backdrop {
+  background: rgba(20, 26, 36, 0.45);
+}
+.dialog h2 {
+  margin: 0;
+}
+.assignment {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.assignment:last-child {
+  border-bottom: none;
+}
+.assignment-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.task-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}

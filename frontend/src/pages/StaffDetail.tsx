@@ -1,19 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Agent, AgentInput, api } from "../api";
+import { Agent, AgentInput, Assignment, api } from "../api";
 import AgentForm from "../components/AgentForm";
 import Avatar from "../components/Avatar";
 import StatusBadge from "../components/StatusBadge";
+import { PRIORITY, PROJECT_STATUS, TASK_STATUS } from "../labels";
 
 export default function StaffDetail() {
   const { id } = useParams();
   const agentId = Number(id);
   const [agent, setAgent] = useState<Agent | null>(null);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     api.agent(agentId).then(setAgent).catch((e: Error) => setError(e.message));
+    api.assignments(agentId).then(setAssignments).catch(() => undefined);
   }, [agentId]);
 
   const initial = useMemo<AgentInput | null>(
@@ -79,8 +82,28 @@ export default function StaffDetail() {
       </section>
 
       <section className="card">
-        <h2>担当タスクと会話</h2>
-        <p className="muted">プロジェクト機能ができると、ここに担当タスクと社員スレッドが表示されます。</p>
+        <h2>所属プロジェクトと担当タスク</h2>
+        {assignments.length === 0 && <p className="muted">まだどのプロジェクトにもアサインされていません。</p>}
+        {assignments.map((a) => (
+          <div key={a.project_id} className="assignment">
+            <div className="assignment-head">
+              <Link to={`/projects/${a.project_id}`} className="agent-name">{a.project_name}</Link>
+              <span className="muted small">{a.role.name}{a.is_primary && "・窓口"} · {PROJECT_STATUS[a.project_status]}</span>
+            </div>
+            {a.tasks.length === 0 ? (
+              <p className="muted small">担当タスクはありません。</p>
+            ) : (
+              <ul className="task-list">
+                {a.tasks.map((t) => (
+                  <li key={t.id}>
+                    <span className={`badge task-${t.status}`}>{TASK_STATUS[t.status]}</span> {t.title}
+                    {t.priority !== "normal" && <span className="muted small"> · 優先度 {PRIORITY[t.priority]}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ))}
       </section>
     </>
   );
