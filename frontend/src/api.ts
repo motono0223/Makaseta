@@ -302,6 +302,10 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers: body === undefined || isForm ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   });
+  if (res.status === 401 && !path.startsWith("/api/auth/")) {
+    // Session expired or missing: show the login screen.
+    window.dispatchEvent(new Event("makaseta:logged-out"));
+  }
   if (!res.ok) {
     throw new ApiError(await errorMessage(res));
   }
@@ -330,6 +334,9 @@ async function errorMessage(res: Response): Promise<string> {
 }
 
 export const api = {
+  authStatus: () => request<{ required: boolean; authenticated: boolean }>("GET", "/api/auth/status"),
+  login: (password: string) => request<{ ok: boolean }>("POST", "/api/auth/login", { password }),
+  logout: () => request<{ ok: boolean }>("POST", "/api/auth/logout"),
   health: () => request<Health>("GET", "/api/health"),
   modelProfiles: () => request<ModelProfile[]>("GET", "/api/settings/models"),
   skills: () => request<Skill[]>("GET", "/api/skills"),

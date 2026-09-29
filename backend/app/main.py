@@ -12,7 +12,9 @@ from .config import get_settings
 from .db import check_database, run_migrations, session_factory
 from .library import Scanner
 from .llm_profiles import ModelProfile, load_profiles
-from . import sandbox, skill_packages
+from pydantic import BaseModel
+
+from . import auth, sandbox, skill_packages
 from .routers import agents, library, projects, skills, work
 from .worker import Worker
 
@@ -39,12 +41,50 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="makaseta", version=__version__, lifespan=lifespan)
 
 
+OPEN_PATHS = {"/api/health", "/api/auth/status", "/api/auth/login", "/api/auth/logout"}
+
+
 @app.middleware("http")
-async def refuse_sandbox(request: Request, call_next):
+async def guard(request: Request, call_next):
     # Scripts in the sandbox share a network with the app so the app can call them; they must never call back.
     if request.client and request.client.host in sandbox.addresses():
         return JSONResponse({"detail": "forbidden"}, status_code=403)
+    path = request.url.path
+    if (auth.required() and path.startswith("/api/") and path not in OPEN_PATHS
+            and not auth.valid(request.cookies.get(auth.COOKIE))):
+        return JSONResponse({"detail": "ログインしてください"}, status_code=401)
     return await call_next(request)
+
+
+class LoginIn(BaseModel):
+    password: str
+
+
+@app.get("/api/auth/status")
+def auth_status(request: Request) -> dict:
+    return {"required": auth.required(), "authenticated": not auth.required() or auth.valid(
+        request.cookies.get(auth.COOKIE))}
+
+
+@app.post("/api/auth/login")
+def login(body: LoginIn, request: Request) -> JSONResponse:
+    client = request.client.host if request.client else "unknown"
+    if not auth.required():
+        return JSONResponse({"ok": True})
+    if not auth.check_password(body.password, client):
+        message = ("試行回数が多すぎます。1分ほど待ってください" if auth.too_many_attempts(client)
+                   else "パスワードが違います")
+        return JSONResponse({"detail": message}, status_code=401)
+    response = JSONResponse({"ok": True})
+    response.set_cookie(auth.COOKIE, auth.issue(), max_age=auth.MAX_AGE, httponly=True, samesite="lax")
+    return response
+
+
+@app.post("/api/auth/logout")
+def logout() -> JSONResponse:
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(auth.COOKIE)
+    return response
 app.include_router(agents.router)
 app.include_router(library.router)
 app.include_router(projects.router)

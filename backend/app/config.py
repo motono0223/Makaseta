@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     sandbox_url: str = "http://localhost:8000"
     sandbox_timeout: int = 180
     github_token: str = ""
+    makaseta_password: str = ""
 
     aws_dir: Path = Path.home() / ".aws"
     aws_profile: str = "default"

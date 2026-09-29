@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { api } from "./api";
 import { ThreadProvider } from "./components/ThreadDrawer";
@@ -28,6 +28,53 @@ const NAV = [
 ];
 
 export default function App() {
+  const [auth, setAuth] = useState<{ required: boolean; authenticated: boolean } | null>(null);
+  const checkAuth = useCallback(() => {
+    api.authStatus().then(setAuth).catch(() => setAuth({ required: false, authenticated: true }));
+  }, []);
+  useEffect(() => {
+    checkAuth();
+    window.addEventListener("makaseta:logged-out", checkAuth);
+    return () => window.removeEventListener("makaseta:logged-out", checkAuth);
+  }, [checkAuth]);
+
+  if (!auth) return null;
+  if (!auth.authenticated) return <Login onDone={checkAuth} />;
+  return <Office canLogout={auth.required} onLogout={() => api.logout().finally(checkAuth)} />;
+}
+
+function Login({ onDone }: { onDone: () => void }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await api.login(password);
+      onDone();
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+  return (
+    <div className="login">
+      <form className="card login-card form" onSubmit={submit}>
+        <div className="brand login-brand">
+          <span className="brand-name">makaseta</span>
+          <span className="brand-sub">任せた</span>
+        </div>
+        <div className="field">
+          <label htmlFor="password">パスワード</label>
+          <input id="password" type="password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} />
+        </div>
+        {error && <p className="status bad">{error}</p>}
+        <button type="submit" className="btn primary">ログイン</button>
+      </form>
+    </div>
+  );
+}
+
+function Office({ canLogout, onLogout }: { canLogout: boolean; onLogout: () => void }) {
   const [inboxCount, setInboxCount] = useState(0);
   const refreshInbox = useCallback(() => {
     api.inbox().then((items) => setInboxCount(items.length)).catch(() => undefined);
@@ -50,6 +97,9 @@ export default function App() {
               </NavLink>
             ))}
           </nav>
+          {canLogout && (
+            <button type="button" className="nav-link logout" onClick={onLogout}>ログアウト</button>
+          )}
         </aside>
         <main className="content">
           <Routes>

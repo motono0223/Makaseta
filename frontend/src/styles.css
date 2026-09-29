@@ -1235,3 +1235,32 @@ dialog.dialog[open] {
   margin: auto;
   z-index: 30;
 }
+
+/* ---- login ---- */
+.login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--sidebar);
+}
+.login-card {
+  width: min(360px, 100%);
+}
+.login-brand .brand-name {
+  color: var(--text);
+}
+.login-brand .brand-sub {
+  color: var(--muted);
+}
+.nav-link.logout {
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 24px;
+  opacity: 0.7;
+  width: 100%;
+  text-align: left;
+}
