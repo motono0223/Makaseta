@@ -69,9 +69,12 @@ def record_usage(session: Session, model: Model, response, *, agent_id: int | No
     cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
     price_in = model.profile.price_input or 0.0
     price_out = model.profile.price_output or 0.0
+    server = getattr(usage, "server_tool_use", None)
+    searches = (getattr(server, "web_search_requests", 0) or 0) if server else 0
     cost = Decimal(str(
         (usage.input_tokens * price_in + usage.output_tokens * price_out
          + cache_read * price_in * CACHE_READ_RATE + cache_write * price_in * CACHE_WRITE_RATE) / 1_000_000
+        + searches * get_settings().web_search_price_usd
     )).quantize(Decimal("0.000001"))
     session.add(UsageRecord(
         agent_id=agent_id, project_id=project_id, task_id=task_id, run_id=run_id,

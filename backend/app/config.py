@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     max_steps_per_run: int = 40
     # After each review the assignee reflects and keeps what it learned in its 業務メモ.
     agent_reflection: bool = True
+    # USD per web search (Anthropic web search is billed per search on top of tokens).
+    web_search_price_usd: float = 0.01
     embedding_model_profile: str = "embed-main"
 
 

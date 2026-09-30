@@ -5,6 +5,7 @@ Document text goes back wrapped in <document> tags and is treated as data, not i
 """
 
 import json
+import re
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -35,7 +36,11 @@ ALWAYS = {
     "review": ["list_documents", "read_document", "read_deliverables", "approve_work", "request_changes"],
 }
 # Skill tools that make sense while planning (reading only; deliverables come from the tasks).
-PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document", "read_skill", "read_skill_file"}
+PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document", "read_skill", "read_skill_file",
+                    "web_search", "web_fetch"}
+# Tools that run on Anthropic's side (Claude API only; Bedrock does not offer them).
+SERVER_TOOLS = {"web_search", "web_fetch"}
+WEB_USES_PER_CALL = 5
 MAX_WORKSPACE_WRITE = 1_000_000
 MAX_SUBMIT_BYTES = 100 * 1024 * 1024
 
@@ -285,6 +290,21 @@ def tools_for(agent: Agent, kind: str = "task") -> list[dict]:
         names &= PLAN_SKILL_TOOLS
     names |= set(ALWAYS[kind])
     return [DEFINITIONS[n] for n in DEFINITIONS if n in names]
+
+
+def server_tools_for(agent: Agent, kind: str, provider: str, model: str) -> list[dict]:
+    """Anthropic-hosted tools (web search and fetch) for agents with the Web検索 skill on the Claude API."""
+    names = {t for s in agent.skills if s.enabled for t in s.tools} & SERVER_TOOLS
+    if kind == "review":
+        names &= PLAN_SKILL_TOOLS
+    if provider != "anthropic" or not names:
+        return []
+    # Newer models filter results before they reach the context; older ones (e.g. Haiku 4.5) use the basic tools.
+    legacy = "haiku" in model or re.search(r"-4-[0-5](?!\d)", model) is not None
+    versions = {"web_search": "web_search_20250305" if legacy else "web_search_20260209",
+                "web_fetch": "web_fetch_20250910" if legacy else "web_fetch_20260209"}
+    return [{"type": versions[n], "name": n, "max_uses": WEB_USES_PER_CALL} for n in ("web_search", "web_fetch")
+            if n in names]
 
 
 @dataclass

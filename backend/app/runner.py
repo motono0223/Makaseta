@@ -1,5 +1,6 @@
 """Executes runs: the tool loop for a task or a plan, or a single reply in an agent's thread."""
 
+import json
 import logging
 from decimal import Decimal
 
@@ -8,7 +9,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from . import work
-from .agent_tools import PAUSING, RUNNER_TOOLS, ToolContext, ToolFailure, describe_call, run_tool, tools_for
+from .agent_tools import (
+    PAUSING,
+    RUNNER_TOOLS,
+    ToolContext,
+    ToolFailure,
+    describe_call,
+    run_tool,
+    server_tools_for,
+    tools_for,
+)
 from .config import get_settings
 from .llm import LLMError, Model, check_budget, open_model, record_usage
 from .models import Agent, AgentNote, Deliverable, Message, Plan, Project, Run, RunStep, Task
@@ -224,7 +234,7 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
     model = open_model(agent.model_profile)
     ctx = ToolContext.build(session, agent, project, task, kind, plan.id if plan else None)
     system = [{"type": "text", "text": persona(agent) + ("\n\n" + rules if rules else "")}]
-    tools = tools_for(agent, kind)
+    tools = tools_for(agent, kind) + server_tools_for(agent, kind, model.profile.provider, model.profile.model)
     messages: list[dict] = list(run.transcript)
     if not messages:
         messages = [{"role": "user", "content": [{"type": "text", "text": first()}]}]
@@ -250,7 +260,8 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
             _save(run, messages)
             raise LLMError(f"1回の作業の上限（{max_steps}ステップ）に達したため止めました。指示を具体的にして再実行してください")
         check_budget(session)
-        if task is not None and kind == "task":
+        # After pause_turn the assistant turn is resumed as is: nothing may be appended after it.
+        if task is not None and kind == "task" and messages[-1]["role"] == "user":
             _inject_instructions(session, run, task, messages)
 
         response = model.create(system=system, tools=tools, messages=messages, cache_control={"type": "ephemeral"})
@@ -260,6 +271,13 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
         for block in content:
             if block["type"] == "text" and block["text"].strip():
                 _step(session, run, "text", "", block["text"])
+            else:
+                _log_server_tool(session, run, block)
+        if response.stop_reason == "pause_turn":
+            # A server-side search loop paused; sending the conversation back resumes it.
+            _save(run, messages)
+            session.commit()
+            continue
 
         if response.stop_reason == "refusal":
             _save(run, messages)
@@ -309,6 +327,26 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
         messages.append({"role": "user", "content": results})
         _save(run, messages)
         session.commit()
+
+
+def _log_server_tool(session: Session, run: Run, block: dict) -> None:
+    """Work-log lines for web search and fetch, which run on Anthropic's side."""
+    kind = block.get("type")
+    if kind == "server_tool_use":
+        _step(session, run, "tool_call", block.get("name", ""), json.dumps(block.get("input") or {}, ensure_ascii=False))
+    elif kind == "web_search_tool_result":
+        results = block.get("content")
+        if isinstance(results, list):
+            lines = [f"- {r.get('title', '')} {r.get('url', '')}" for r in results if r.get("type") == "web_search_result"]
+            _step(session, run, "tool_result", "web_search", "\n".join(lines) or "（見つかりませんでした）")
+        else:
+            _step(session, run, "error", "web_search", f"検索できませんでした: {(results or {}).get('error_code', '')}")
+    elif kind == "web_fetch_tool_result":
+        result = block.get("content") or {}
+        if result.get("type") == "web_fetch_result":
+            _step(session, run, "tool_result", "web_fetch", f"読みました: {result.get('url', '')}")
+        else:
+            _step(session, run, "error", "web_fetch", f"ページを読めませんでした: {result.get('error_code', '')}")
 
 
 def _call_tool(session: Session, run: Run, ctx: ToolContext, use: dict) -> dict:

@@ -30,6 +30,8 @@ const STEP_LABEL: Record<string, string> = {
   ask_manager: "オフィス長に質問",
   finish: "完了を報告",
   ask_colleague: "同僚に相談",
+  web_search: "Webを検索",
+  web_fetch: "Webページを読む",
   read_deliverables: "成果物を読む",
   approve_work: "レビュー: 問題なし",
   request_changes: "レビュー: 修正を依頼",

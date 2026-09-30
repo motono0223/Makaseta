@@ -41,6 +41,14 @@ BUILTIN_SKILLS = [
         "tools": ["list_documents", "read_document"],
     },
     {
+        "key": "web",
+        "name": "Web検索",
+        "description": "インターネットで最新の情報を調べ、ページを読む（Anthropic API のモデルで使えます）",
+        "instructions": "資料室にない最新の情報や一般的な情報は Web で調べる。使った情報は出典のURLを必ず示す。"
+                        "社外秘の情報や個人情報を検索語に入れない。",
+        "tools": ["web_search", "web_fetch"],
+    },
+    {
         "key": "plan",
         "name": "タスク分解",
         "description": "依頼を具体的なタスクに分け、担当を割り振る",
@@ -83,7 +91,7 @@ AGENT_TEMPLATES = [
         "description": "資料を調べて要点を整理する",
         "personality": "好奇心が強く、事実と推測をはっきり分けて話す。",
         "instructions": "依頼に関係する資料を資料室から探し、根拠となる文書名を必ず示してまとめる。分からないことは推測で埋めず、質問する。",
-        "skill_keys": ["search", "summarize"],
+        "skill_keys": ["search", "web", "summarize"],
         "avatar_color": "c1",
     },
     {
@@ -101,7 +109,7 @@ AGENT_TEMPLATES = [
         "description": "データや情報を比較・分析する",
         "personality": "数字に強く、前提と限界を明示する。",
         "instructions": "比較の軸を先に決め、数字には出典と単位を付ける。結論には確からしさを添える。",
-        "skill_keys": ["search", "summarize", "write"],
+        "skill_keys": ["search", "web", "summarize", "write"],
         "avatar_color": "c3",
     },
     {
