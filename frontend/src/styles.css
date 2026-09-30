@@ -1373,3 +1373,12 @@ dialog.dialog[open] {
 .copy-button {
   white-space: nowrap;
 }
+.folder-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.folder-title .small-btn {
+  font-weight: 400;
+}

@@ -42,6 +42,7 @@ PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document", "read
 SERVER_TOOLS = {"web_search", "web_fetch"}
 WEB_USES_PER_CALL = 5
 MAX_WORKSPACE_WRITE = 1_000_000
+LIST_LIMIT = 300
 MAX_SUBMIT_BYTES = 100 * 1024 * 1024
 
 DEFINITIONS = {
@@ -60,12 +61,14 @@ DEFINITIONS = {
     },
     "list_documents": {
         "name": "list_documents",
-        "description": "リンクされた資料室のフォルダの中身（文書とサブフォルダ）を一覧する。",
+        "description": "リンクされた資料室のフォルダの中身（文書とサブフォルダ）を一覧する。"
+                       "recursive を true にすると、サブフォルダの中の文書もまとめて一覧する。",
         "input_schema": {
             "type": "object",
             "properties": {
                 "room": {"type": "string", "description": "資料室名"},
                 "folder": {"type": "string", "description": "資料室内のフォルダのパス。省略時は最上位"},
+                "recursive": {"type": "boolean", "description": "サブフォルダの中も含めるなら true"},
             },
             "required": ["room"],
         },
@@ -430,9 +433,14 @@ def _snippet(text: str, terms: list[str], radius: int = 80) -> str:
 
 def _list(ctx: ToolContext, args: dict) -> str:
     room = _room(ctx, args["room"])
-    folder = library.resolve(room, args.get("folder") or "")
+    folder = library.resolve(room, str(args.get("folder") or "").strip("/"))
     if not folder.is_dir():
         raise ToolFailure("フォルダが見つかりません")
+    if args.get("recursive"):
+        files = [p for p in library.iter_files(folder)][:LIST_LIMIT]
+        lines = [f"- {library.relative(room, p)}（{p.stat().st_size} bytes）" for p in sorted(files)]
+        more = "\n…（多いため途中まで）" if len(files) >= LIST_LIMIT else ""
+        return ("\n".join(lines) + more) if lines else "（文書はありません）"
     lines = []
     for child in sorted(folder.iterdir(), key=lambda p: (not p.is_dir(), p.name)):
         if child.name.startswith("."):

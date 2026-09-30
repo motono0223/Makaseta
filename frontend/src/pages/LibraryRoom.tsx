@@ -117,6 +117,11 @@ export default function LibraryRoom() {
   }
 
   const crumbs = folder.split("/").filter(Boolean);
+  const folderPath = `${room}/${folder ? `${folder}/` : ""}`;
+
+  async function copyPath(text: string) {
+    setNotice(await copyText(text) ? `パスをコピーしました: ${text}` : "コピーできませんでした");
+  }
 
   return (
     <>
@@ -132,7 +137,12 @@ export default function LibraryRoom() {
         ))}
       </p>
       <div className="page-header">
-        <h1>{crumbs.at(-1) ?? room}</h1>
+        <h1 className="folder-title">
+          {crumbs.at(-1) ?? room}
+          <button type="button" className="btn small-btn" title={`${folderPath} をコピー`} onClick={() => copyPath(folderPath)}>
+            📋 このフォルダのパス
+          </button>
+        </h1>
         <div className="header-actions">
           <button type="button" className="btn primary" onClick={() => fileInput.current?.click()} disabled={busy}>
             アップロード
@@ -204,13 +214,11 @@ export default function LibraryRoom() {
                     )}
                   </td>
                   <td>
-                    {!e.is_dir && (
-                      <button type="button" className="link-button small copy-button" title={`${room}/${e.path} をコピー`}
-                        onClick={async () => setNotice(await copyText(`${room}/${e.path}`)
-                          ? `パスをコピーしました: ${room}/${e.path}` : "コピーできませんでした")}>
-                        📋 パス
-                      </button>
-                    )}{" "}
+                    <button type="button" className="link-button small copy-button"
+                      title={`${room}/${e.path}${e.is_dir ? "/" : ""} をコピー`}
+                      onClick={() => copyPath(`${room}/${e.path}${e.is_dir ? "/" : ""}`)}>
+                      📋 パス
+                    </button>{" "}
                     <button type="button" className="link-button danger small" onClick={() => onDelete(e)}>削除</button>
                   </td>
                 </tr>
