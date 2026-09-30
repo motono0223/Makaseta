@@ -113,6 +113,8 @@ TASK_RULES = """
   提出できるのは「読み書き」の資料室だけです。
 - 判断に必要な情報が足りないときは ask_manager で質問します。回答が届くまで作業は止まります。
 - 作業が終わったら、必ず finish で報告します。報告には、結果の要点・提出した成果物・残った課題を書きます。
+- あなたの担当はこのタスクだけです。プロジェクトのほかの仕事はマネージャーが割り振るので、気にしたり提案したりしません。
+- finish の報告は、終わった仕事の報告です。質問や「どうしますか」という確認は書きません（確認が必要なら、finish の前に ask_manager を使います）。
 """.strip()
 
 
@@ -124,7 +126,7 @@ PLAN_RULES = """
 - ロールに合う担当者を選び、1人に偏らないようにします（調査は調査担当、文章は資料作成者）。
 - 成果物のあるタスクには、レビュアーのロールのメンバーを reviewer に指定します（誰にするかをオフィス長に質問しません）。
 - 「レビュー」「確認」だけのタスクは作りません。確認は reviewer の指定で行われ、指摘があれば担当者が直します。
-- あなた自身の取りまとめタスクは最後に自動で追加されるので、計画には含めません。
+- 最後の取りまとめは、元の依頼のタスクであなたが行うので、計画には含めません。
 - 依頼があいまいで計画が立てられないときは ask_manager で確認します。
 - 計画ができたら propose_plan で提案します。
 """.strip()
@@ -476,6 +478,11 @@ def _pause(session: Session, run: Run, agent: Agent, project: Project, task: Tas
         plan.items = items
         plan.summary = summary
         plan.status = "proposed"
+        title = str(args.get("title") or "").strip()
+        if title and plan.owns_parent and plan.parent_task_id:
+            parent = session.get(Task, plan.parent_task_id)
+            if parent is not None and parent.title == work.short_title(parent.instructions, 60):
+                parent.title = work.short_title(title, 60)
         run.status = "succeeded"
         run.ended_at = work.now()
         post(session, sender="agent", kind="plan", agent_id=agent.id, project_id=project.id, run_id=run.id,

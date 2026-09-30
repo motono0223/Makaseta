@@ -279,10 +279,11 @@ DEFINITIONS = {
     "propose_plan": {
         "name": "propose_plan",
         "description": "オフィス長の依頼をタスクに分けた計画を提案する。オフィス長が承認すると、タスクが作られて担当者に"
-                       "割り振られ、前工程のないタスクから作業が始まる。最後の取りまとめタスクはあなたに自動で追加される。",
+                       "割り振られ、前工程のないタスクから作業が始まる。サブタスクが全部終わると、元の依頼のタスクであなたが取りまとめる。",
         "input_schema": {
             "type": "object",
             "properties": {
+                "title": {"type": "string", "description": "依頼を短く言い表した名前（25字以内。例: 新人向け社内ルールガイドの作成）。カンバンのカード名になる"},
                 "summary": {"type": "string", "description": "計画の概要と進め方（オフィス長向け、数行）"},
                 "tasks": {
                     "type": "array",

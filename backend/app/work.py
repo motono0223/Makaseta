@@ -291,9 +291,14 @@ def decompose(session: Session, task: Task) -> Plan:
     return plan
 
 
+# Titles like 「〜のレビュー」 mark a review-only task; reviews belong on the producing task instead.
+REVIEW_ONLY_WORDS = ("レビュー", "確認", "チェック", "校正", "査読")
+
+
 def validate_plan(project: Project, args: dict) -> tuple[list[dict], list[str]]:
     """Turn propose_plan input into plan items, or explain what is wrong so the manager can fix it."""
     members = {m.agent.name: m.agent for m in project.members if m.agent.active}
+    roles = {m.agent_id: m.role.key for m in project.members}
     tasks = args.get("tasks") or []
     errors = []
     if not tasks:
@@ -311,6 +316,9 @@ def validate_plan(project: Project, args: dict) -> tuple[list[dict], list[str]]:
         if reviewer is not None and assignee is not None and reviewer.id == assignee.id:
             errors.append(f"{number}番目: 担当とレビュー担当は別の人にしてください")
         deps = t.get("depends_on") or []
+        if title.rstrip("。 ").endswith(REVIEW_ONLY_WORDS) or (
+                assignee is not None and roles.get(assignee.id) == "reviewer" and any(w in title for w in REVIEW_ONLY_WORDS)):
+            errors.append(f"{number}番目: レビューや確認だけのタスクは作れません。確認する人は、成果物を作るタスクの reviewer に指定してください")
         if not title:
             errors.append(f"{number}番目: title が空です")
         if assignee is None:

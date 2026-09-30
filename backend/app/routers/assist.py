@@ -204,6 +204,10 @@ def _validate(raw: dict, agents: list[Agent], roles: list[ProjectRole], rooms: l
     if links and not any(link.access == "write" for link in links):
         links[0].access = "write"  # somewhere to keep the deliverables
 
-    return ProjectDraft(name=str(raw.get("name", ""))[:80], goal=str(raw.get("goal", "")),
-                        done_criteria=str(raw.get("done_criteria", "")), members=members,
+    def text(key: str) -> str:
+        # Models sometimes double-escape line breaks inside tool input.
+        return str(raw.get(key, "")).replace("\\n", "\n").strip()
+
+    return ProjectDraft(name=text("name")[:80], goal=text("goal"),
+                        done_criteria=text("done_criteria"), members=members,
                         new_members=new_members, rooms=links)
