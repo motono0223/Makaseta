@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { ApiError, LibraryEntry, LibraryRoom as LibraryRoomInfo, SearchHit, api } from "../api";
 import FileViewer from "../components/FileViewer";
 import SearchResults from "../components/SearchResults";
+import { copyText } from "../clipboard";
 import { formatDate, formatSize, libraryPath } from "../format";
 
 type Mode = null | "folder" | "note";
@@ -203,6 +204,13 @@ export default function LibraryRoom() {
                     )}
                   </td>
                   <td>
+                    {!e.is_dir && (
+                      <button type="button" className="link-button small copy-button" title={`${room}/${e.path} をコピー`}
+                        onClick={async () => setNotice(await copyText(`${room}/${e.path}`)
+                          ? `パスをコピーしました: ${room}/${e.path}` : "コピーできませんでした")}>
+                        📋 パス
+                      </button>
+                    )}{" "}
                     <button type="button" className="link-button danger small" onClick={() => onDelete(e)}>削除</button>
                   </td>
                 </tr>

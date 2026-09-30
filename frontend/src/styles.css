@@ -1362,3 +1362,14 @@ dialog.dialog[open] {
   gap: 4px;
   margin-bottom: 10px;
 }
+.talk-picker {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+  background: #f7f9fc;
+  border-radius: 8px;
+}
+.copy-button {
+  white-space: nowrap;
+}

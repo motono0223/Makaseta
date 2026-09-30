@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { FileVersion, TextView, api, libraryUrl } from "../api";
+import { Agent, FileVersion, Project, TextView, api, libraryUrl } from "../api";
+import { copyText } from "../clipboard";
+import { useThread } from "./ThreadDrawer";
 import { formatDate, formatSize } from "../format";
 import Markdown from "./Markdown";
 
@@ -13,6 +15,9 @@ export default function FileViewer({ room, path, onClose, onSaved }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [versions, setVersions] = useState<FileVersion[] | null>(null);
   const [preview, setPreview] = useState<{ version: string; content: string } | null>(null);
+  const [talk, setTalk] = useState<{ agents: Agent[]; projects: Project[] } | null>(null);
+  const openThread = useThread();
+  const fullPath = `${room}/${path}`;
 
   useEffect(() => {
     setView(null);
@@ -54,6 +59,15 @@ export default function FileViewer({ room, path, onClose, onSaved }: Props) {
             <button type="button" className="btn" onClick={() => setEditing(true)}>編集</button>
           )}
           <a className="btn" href={libraryUrl.download(room, path)}>ダウンロード</a>
+          <button type="button" className="btn" onClick={async () =>
+            setNotice(await copyText(fullPath) ? `パスをコピーしました: ${fullPath}` : "コピーできませんでした")}>
+            📋 パスをコピー
+          </button>
+          <button type="button" className="btn primary" onClick={() => talk ? setTalk(null)
+            : Promise.all([api.agents(), api.projects()]).then(([agents, projects]) => setTalk({ agents, projects }))
+              .catch((e: Error) => setError(e.message))}>
+            💬 社員と話す
+          </button>
           <button type="button" className="btn" onClick={() => versions ? setVersions(null)
             : api.versions(room, path).then(setVersions).catch((e: Error) => setError(e.message))}>
             過去の版
@@ -62,6 +76,13 @@ export default function FileViewer({ room, path, onClose, onSaved }: Props) {
         </div>
       </div>
       {notice && <p className="status ok">{notice}</p>}
+      {talk && (
+        <TalkPicker room={room} agents={talk.agents} projects={talk.projects}
+          onPick={(agentId) => {
+            setTalk(null);
+            openThread(agentId, `「${fullPath}」について: `);
+          }} />
+      )}
       {versions && (
         <div className="versions">
           {versions.length === 0 && <p className="muted small">過去の版はありません（上書きされると、ここに残ります）。</p>}
@@ -121,5 +142,35 @@ export default function FileViewer({ room, path, onClose, onSaved }: Props) {
         </>
       )}
     </section>
+  );
+}
+
+/** Choose who to ask about a file; agents on a project that links the room can read it in conversation. */
+function TalkPicker({ room, agents, projects, onPick }: {
+  room: string;
+  agents: Agent[];
+  projects: Project[];
+  onPick: (agentId: number) => void;
+}) {
+  const linking = projects.filter((p) => p.rooms.some((r) => r.room === room));
+  const readers = new Set(linking.flatMap((p) => p.members.map((m) => m.agent.id)));
+  const sorted = [...agents].sort((a, b) => Number(readers.has(b.id)) - Number(readers.has(a.id)));
+  return (
+    <div className="talk-picker">
+      <div className="small"><strong>このファイルについて誰と話しますか？</strong></div>
+      {linking.length === 0 && (
+        <p className="hint warn">この資料室は、どのプロジェクトにもリンクされていません。社員が読めるように、プロジェクトの設定でリンクしてください。</p>
+      )}
+      <div className="name-ideas">
+        {sorted.map((a) => (
+          <button key={a.id} type="button" className="name-idea" onClick={() => onPick(a.id)}>
+            <strong>{a.name}</strong>
+            <span className="muted small">
+              {a.title}{readers.has(a.id) ? "" : " · この資料室を読めません"}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

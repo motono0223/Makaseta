@@ -7,26 +7,31 @@ import Avatar from "./Avatar";
 import MessageList from "./MessageList";
 import StatusBadge from "./StatusBadge";
 
-const ThreadContext = createContext<(agentId: number) => void>(() => undefined);
+type OpenThread = (agentId: number, draft?: string) => void;
+const ThreadContext = createContext<OpenThread>(() => undefined);
 
-/** Open an agent's thread from anywhere: `const openThread = useThread(); openThread(agent.id)`. */
+/** Open an agent's thread from anywhere: `openThread(agent.id)`, optionally with a message ready to send. */
 export const useThread = () => useContext(ThreadContext);
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
-  const [agentId, setAgentId] = useState<number | null>(null);
+  const [open, setOpen] = useState<{ agentId: number; draft: string } | null>(null);
+  const openThread = useCallback<OpenThread>((agentId, draft = "") => setOpen({ agentId, draft }), []);
   return (
-    <ThreadContext.Provider value={setAgentId}>
+    <ThreadContext.Provider value={openThread}>
       {children}
-      {agentId !== null && <ThreadDrawer key={agentId} agentId={agentId} onClose={() => setAgentId(null)} />}
+      {open !== null && (
+        <ThreadDrawer key={`${open.agentId}-${open.draft}`} agentId={open.agentId} draft={open.draft}
+          onClose={() => setOpen(null)} />
+      )}
     </ThreadContext.Provider>
   );
 }
 
-function ThreadDrawer({ agentId, onClose }: { agentId: number; onClose: () => void }) {
+function ThreadDrawer({ agentId, draft, onClose }: { agentId: number; draft: string; onClose: () => void }) {
   const [agent, setAgent] = useState<Agent | null>(null);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [text, setText] = useState("");
+  const [text, setText] = useState(draft);
   const [asAnswer, setAsAnswer] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -125,6 +130,7 @@ function ThreadDrawer({ agentId, onClose }: { agentId: number; onClose: () => vo
           )}
           <textarea
             rows={3}
+            autoFocus={Boolean(draft)}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {

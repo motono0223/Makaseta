@@ -22,7 +22,7 @@ from .library import LibraryError
 from .sandbox import SandboxError
 from .skill_packages import SkillPackageError
 from .llm_profiles import load_profiles
-from .models import Agent, Deliverable, Document, LibraryRoom, Project, Task
+from .models import Agent, Deliverable, Document, LibraryRoom, Project, ProjectMember, Task
 
 READ_CHUNK = 20_000
 SEARCH_LIMIT = 10
@@ -311,7 +311,7 @@ def server_tools_for(agent: Agent, kind: str, provider: str, model: str) -> list
 class ToolContext:
     session: Session
     agent: Agent
-    project: Project
+    project: Project | None
     task: Task | None
     workspace: str = ""
     allowed: set[str] = field(default_factory=set)
@@ -351,6 +351,21 @@ def run_tool(ctx: ToolContext, name: str, args: dict) -> str:
         raise ToolFailure(str(exc)) from exc
     except (KeyError, TypeError, ValueError) as exc:
         raise ToolFailure(f"引数が正しくありません: {exc}") from exc
+
+
+# Reading tools an agent can use while talking in its thread, whatever its skills.
+CHAT_TOOLS = ["search_documents", "list_documents", "read_document"]
+
+
+def chat_context(session: Session, agent: Agent) -> ToolContext:
+    """Read-only access, for thread conversations, to the rooms linked to the agent's current projects."""
+    rooms: dict[str, str] = {}
+    for member in session.scalars(select(ProjectMember).join(Project).where(
+            ProjectMember.agent_id == agent.id, Project.status != "archived")):
+        for link in member.project.rooms:
+            rooms.setdefault(link.room, "read")
+    return ToolContext(session=session, agent=agent, project=None, task=None, allowed=set(CHAT_TOOLS), rooms=rooms,
+                       blocked=blocked_rooms(session, agent, list(rooms)))
 
 
 def blocked_rooms(session: Session, agent: Agent, rooms: list[str]) -> set[str]:
