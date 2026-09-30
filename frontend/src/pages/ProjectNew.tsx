@@ -14,6 +14,7 @@ export default function ProjectNew() {
     done_criteria: "",
     due_date: null,
     require_plan_approval: true,
+    auto_manage: true,
   });
   const [members, setMembers] = useState<MemberInput[]>([]);
   const [links, setLinks] = useState<RoomLink[]>([]);

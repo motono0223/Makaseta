@@ -85,6 +85,17 @@ class Worker:
         try:
             with self._session_factory()() as session:
                 runner.execute(session, run_id)
+            self._schedule_after(run_id)
         finally:
             self._slots.release()
             self._wake.set()
+
+    def _schedule_after(self, run_id: int) -> None:
+        """An agent may have become free: let a manager-run backlog start its next task."""
+        try:
+            with self._session_factory()() as session:
+                run = session.get(Run, run_id)
+                if run is not None and run.project_id is not None and work.schedule(session, run.project_id):
+                    session.commit()
+        except Exception:  # noqa: BLE001 - scheduling is retried after the next run
+            log.exception("scheduling after run %s failed", run_id)

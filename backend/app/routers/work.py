@@ -118,6 +118,7 @@ class PlanItemOut(BaseModel):
 class PlanOut(BaseModel):
     id: int
     project_id: int
+    parent_task_id: int | None = None
     agent_id: int | None
     request: str
     status: str
@@ -455,7 +456,8 @@ def _plan_out(session: Session, plan: Plan) -> PlanOut:
     run = session.scalar(select(Run).where(Run.plan_id == plan.id).order_by(Run.id.desc()))
     task_ids = session.scalars(select(Task.id).where(Task.plan_id == plan.id).order_by(Task.id)).all()
     return PlanOut(
-        id=plan.id, project_id=plan.project_id, agent_id=plan.agent_id, request=plan.request, status=plan.status,
+        id=plan.id, project_id=plan.project_id, parent_task_id=plan.parent_task_id, agent_id=plan.agent_id,
+        request=plan.request, status=plan.status,
         summary=plan.summary,
         items=[PlanItemOut(**item, assignee_name=names.get(item.get("assignee_id")),
                            reviewer_name=names.get(item.get("reviewer_id"))) for item in plan.items],

@@ -8,7 +8,7 @@ import shutil
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -64,6 +64,8 @@ def start_task(session: Session, task: Task) -> Run | None:
     """Queue the assignee's work on a task that just moved to 作業中."""
     if open_run(session, task) is not None or task.assignee_id is None:
         return None
+    if unfinished_subtasks(session, task):
+        return None  # a parent waits in 作業中 until its subtasks are done, then its owner wraps up
     review = run_awaiting_review(session, task)
     if review is not None:
         _resume(review, "オフィス長がこのタスクを作業中に戻しました。これまでの成果物を見直し、必要なら直してから、もう一度 finish で報告してください。")
@@ -130,6 +132,8 @@ def approve(session: Session, task: Task) -> list[Deliverable]:
     if task.status != "done":
         place_task(session, task, "done")
     start_ready_dependents(session, task)
+    _start_parent_if_ready(session, task)
+    schedule(session, task.project_id)
     if task.assignee_id:
         saved = "、".join(f"{d.room}/{d.path}" for d in drafts)
         post(session, sender="manager", kind="review", agent_id=task.assignee_id, project_id=task.project_id,
@@ -251,10 +255,38 @@ def request_plan(session: Session, project: Project, body: str) -> Plan:
     manager = primary_manager(project)
     if manager is None:
         raise HTTPException(status.HTTP_409_CONFLICT, "このプロジェクトには依頼を受けられるマネージャーがいません")
-    plan = Plan(project_id=project.id, agent_id=manager.id, request=body)
+    parent = Task(project_id=project.id, title=short_title(body, 60), instructions=body,
+                  expected_output="依頼への最終報告（サブタスクの結果の取りまとめ）", assignee_id=manager.id)
+    place_task(session, parent, "backlog")
+    session.add(parent)
+    session.flush()
+    plan = Plan(project_id=project.id, agent_id=manager.id, request=body, parent_task_id=parent.id, owns_parent=True)
     session.add(plan)
     session.flush()
-    post(session, sender="manager", kind="request", agent_id=manager.id, project_id=project.id, body=body)
+    post(session, sender="manager", kind="request", agent_id=manager.id, project_id=project.id, task_id=parent.id,
+         body=body)
+    session.add(Run(kind="plan", agent_id=manager.id, project_id=project.id, plan_id=plan.id))
+    return plan
+
+
+def decompose(session: Session, task: Task) -> Plan:
+    """Have the contact manager split a card into subtasks (the card becomes their parent)."""
+    project = session.get(Project, task.project_id)
+    manager = primary_manager(project)
+    if manager is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "このプロジェクトには分解を任せられるマネージャーがいません")
+    if task.status not in ("backlog", "in_progress") or open_run(session, task) is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "作業中・レビュー中のタスクは分解できません")
+    if planning(session, task):
+        raise HTTPException(status.HTTP_409_CONFLICT, "このタスクはすでに分解中です")
+    request = task.title + (f"\n\n{task.instructions}" if task.instructions else "")
+    if task.expected_output:
+        request += f"\n\n期待する成果物: {task.expected_output}"
+    plan = Plan(project_id=project.id, agent_id=manager.id, request=request, parent_task_id=task.id)
+    session.add(plan)
+    session.flush()
+    post(session, sender="manager", kind="request", agent_id=manager.id, project_id=project.id, task_id=task.id,
+         body=f"タスク「{task.title}」をサブタスクに分けて、メンバーに割り振ってください。")
     session.add(Run(kind="plan", agent_id=manager.id, project_id=project.id, plan_id=plan.id))
     return plan
 
@@ -303,6 +335,7 @@ def approve_plan(session: Session, plan: Plan) -> list[Task]:
         raise HTTPException(status.HTTP_409_CONFLICT, "承認できるのは提案中の計画だけです")
     project = session.get(Project, plan.project_id)
     members = {m.agent_id for m in project.members}
+    parent = session.get(Task, plan.parent_task_id) if plan.parent_task_id else None
     created: list[Task] = []
     for item in plan.items:
         if item["assignee_id"] not in members:
@@ -310,22 +343,18 @@ def approve_plan(session: Session, plan: Plan) -> list[Task]:
         task = Task(project_id=project.id, plan_id=plan.id, title=item["title"], instructions=item["instructions"],
                     expected_output=item["expected_output"], priority=item["priority"],
                     assignee_id=item["assignee_id"], reviewer_id=item.get("reviewer_id"),
-                    requested_by_agent_id=plan.agent_id,
+                    requested_by_agent_id=plan.agent_id, parent_id=parent.id if parent else None,
                     depends_on=[created[d - 1].id for d in item["depends_on"]])
         place_task(session, task, "backlog")
         session.add(task)
         session.flush()
         created.append(task)
-    if plan.agent_id in members:
-        wrap_up = Task(project_id=project.id, plan_id=plan.id, title=f"取りまとめ: {short_title(plan.request)}",
-                       instructions="計画した各タスクの報告と成果物を確認し、オフィス長の依頼に対する最終報告をまとめてください。"
-                                    f"\n\n依頼内容:\n{plan.request}",
-                       expected_output="依頼への最終報告（必要なら成果物）", assignee_id=plan.agent_id,
-                       requested_by_agent_id=plan.agent_id, depends_on=[t.id for t in created])
-        place_task(session, wrap_up, "backlog")
-        session.add(wrap_up)
-        session.flush()
-        created.append(wrap_up)
+    if parent is not None:
+        # The manager who planned it wraps it up once every subtask is done.
+        parent.assignee_id = plan.agent_id
+        parent.plan_id = plan.id
+        if parent.status == "backlog":
+            place_task(session, parent, "in_progress")
     plan.status = "approved"
     plan.decided_at = now()
     run = session.scalar(select(Run).where(Run.plan_id == plan.id).order_by(Run.id.desc()))
@@ -334,11 +363,14 @@ def approve_plan(session: Session, plan: Plan) -> list[Task]:
         run.pending_results = []
     post(session, sender="manager", kind="review", agent_id=plan.agent_id, project_id=project.id,
          body=f"計画を承認しました（タスク{len(created)}件）。")
-    for task in created:
-        assignee = session.get(Agent, task.assignee_id)
-        if not task.depends_on and assignee is not None and assignee.active:
-            place_task(session, task, "in_progress")
-            start_task(session, task)
+    if project.auto_manage:
+        schedule(session, project.id)
+    else:
+        for task in created:
+            assignee = session.get(Agent, task.assignee_id)
+            if not task.depends_on and assignee is not None and assignee.active:
+                place_task(session, task, "in_progress")
+                start_task(session, task)
     return created
 
 
@@ -360,6 +392,9 @@ def cancel_plan(session: Session, plan: Plan) -> None:
         run.status, run.ended_at, run.error = "cancelled", now(), "オフィス長が依頼を取り消しました"
     plan.status = "cancelled"
     plan.decided_at = now()
+    parent = session.get(Task, plan.parent_task_id) if plan.parent_task_id else None
+    if parent is not None and plan.owns_parent and not subtasks(session, parent):
+        session.delete(parent)
     post(session, sender="manager", kind="review", agent_id=plan.agent_id, project_id=plan.project_id,
          body="依頼を取り消しました。")
 
@@ -442,3 +477,78 @@ def cancel_peer_review(session: Session, task: Task) -> None:
                                                  Run.status.in_(OPEN_RUN_STATUSES))):
         run.status, run.ended_at, run.error = "cancelled", now(), "オフィス長がレビューを進めました"
     task.review_stage = None
+
+
+# ---- subtasks and a manager-run backlog ----
+
+PRIORITY_ORDER = {"high": 0, "normal": 1, "low": 2}
+
+
+def subtasks(session: Session, task: Task) -> list[Task]:
+    return list(session.scalars(select(Task).where(Task.parent_id == task.id).order_by(Task.id)))
+
+
+def unfinished_subtasks(session: Session, task: Task) -> int:
+    return session.scalar(select(func.count()).select_from(Task).where(
+        Task.parent_id == task.id, Task.status != "done")) or 0
+
+
+def planning(session: Session, task: Task) -> bool:
+    """True while a plan to split this task is being drafted or awaits approval."""
+    return session.scalar(select(Plan.id).where(Plan.parent_task_id == task.id,
+                                                Plan.status.in_(("drafting", "proposed"))).limit(1)) is not None
+
+
+def _start_parent_if_ready(session: Session, done: Task) -> None:
+    if done.parent_id is None:
+        return
+    session.flush()
+    parent = session.get(Task, done.parent_id)
+    if parent is None or parent.status == "done" or unfinished_subtasks(session, parent):
+        return
+    if parent.status != "in_progress":
+        place_task(session, parent, "in_progress")
+    start_task(session, parent)
+
+
+def queue_triage(session: Session, task: Task) -> None:
+    """In a manager-run backlog, the contact manager decides who takes a new unassigned card."""
+    project = session.get(Project, task.project_id)
+    manager = primary_manager(project) if project else None
+    if project is None or not project.auto_manage or manager is None:
+        return
+    if task.assignee_id is not None or task.parent_id is not None:
+        return
+    session.add(Run(kind="triage", agent_id=manager.id, project_id=project.id, task_id=task.id))
+
+
+def triaging(session: Session, task: Task) -> bool:
+    return session.scalar(select(Run.id).where(Run.task_id == task.id, Run.kind == "triage",
+                                               Run.status.in_(OPEN_RUN_STATUSES)).limit(1)) is not None
+
+
+def schedule(session: Session, project_id: int) -> list[Task]:
+    """Start backlog tasks whose assignees have room, highest priority first (manager-run backlogs only)."""
+    project = session.get(Project, project_id)
+    if project is None or not project.auto_manage or project.status in ("paused", "done", "archived"):
+        return []
+    session.flush()
+    limit = max(get_settings().max_active_tasks_per_agent, 1)
+    busy: dict[int, int] = dict(session.execute(
+        select(Run.agent_id, func.count()).where(Run.kind == "task", Run.status.in_(("queued", "running")))
+        .group_by(Run.agent_id)).all())
+    backlog = sorted(session.scalars(select(Task).where(
+        Task.project_id == project.id, Task.status == "backlog", Task.assignee_id.is_not(None))),
+        key=lambda t: (PRIORITY_ORDER.get(t.priority, 1), t.rank, t.id))
+    started = []
+    for task in backlog:
+        agent = session.get(Agent, task.assignee_id)
+        if agent is None or not agent.active or busy.get(agent.id, 0) >= limit:
+            continue
+        if not ready(session, task) or unfinished_subtasks(session, task) or planning(session, task):
+            continue
+        place_task(session, task, "in_progress")
+        if start_task(session, task) is not None:
+            busy[agent.id] = busy.get(agent.id, 0) + 1
+            started.append(task)
+    return started

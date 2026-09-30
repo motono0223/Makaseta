@@ -53,6 +53,8 @@ def execute(session: Session, run_id: int) -> None:
             _reflect(session, run, agent)
         elif run.kind == "review":
             _review_task(session, run, agent)
+        elif run.kind == "triage":
+            _triage_task(session, run, agent)
         else:
             _work_on_task(session, run, agent)
     except LLMError as exc:
@@ -120,7 +122,8 @@ PLAN_RULES = """
 - まず list_members でメンバーのロールとスキルを確認します。必要なら資料室も調べます。
 - 各タスクには担当者・具体的な指示・期待する成果物を書きます。前のタスクの結果が必要なら depends_on で順序を示します。
 - ロールに合う担当者を選び、1人に偏らないようにします（調査は調査担当、文章は資料作成者）。
-- 成果物のあるタスクには、レビュアーのロールのメンバーを reviewer に指定します。確認だけのタスクは作らず、reviewer で済ませます。
+- 成果物のあるタスクには、レビュアーのロールのメンバーを reviewer に指定します（誰にするかをオフィス長に質問しません）。
+- 「レビュー」「確認」だけのタスクは作りません。確認は reviewer の指定で行われ、指摘があれば担当者が直します。
 - あなた自身の取りまとめタスクは最後に自動で追加されるので、計画には含めません。
 - 依頼があいまいで計画が立てられないときは ask_manager で確認します。
 - 計画ができたら propose_plan で提案します。
@@ -148,6 +151,12 @@ def task_brief(session: Session, project: Project, task: Task, agent: Agent | No
     ]
     if task.due_date:
         parts.append(f"期限: {task.due_date}")
+    children = work.subtasks(session, task)
+    if children:
+        parts += ["", "## サブタスクの結果（このタスクはサブタスクに分けて進めました）",
+                  _results_of(session, [c.id for c in children]), "",
+                  "各サブタスクの報告と成果物を確認し、このタスク（依頼）に対する最終報告をまとめてください。"
+                  "足りない点があれば、その旨も報告に書きます。"]
     earlier = _earlier_results(session, task)
     if earlier:
         parts += ["", "## 前のタスクの結果（このタスクの前提）", earlier]
@@ -167,8 +176,12 @@ def _workspace_section(agent: Agent | None, workspace: str) -> list[str]:
 
 def _earlier_results(session: Session, task: Task) -> str:
     """Reports and approved deliverables of the tasks this one depends on, handed over to the next person."""
+    return _results_of(session, task.depends_on or [])
+
+
+def _results_of(session: Session, task_ids: list[int]) -> str:
     blocks = []
-    for dep in session.scalars(select(Task).where(Task.id.in_(task.depends_on or [])).order_by(Task.id)):
+    for dep in session.scalars(select(Task).where(Task.id.in_(task_ids)).order_by(Task.id)):
         assignee = session.get(Agent, dep.assignee_id) if dep.assignee_id else None
         report = session.scalar(select(Message).where(Message.task_id == dep.id, Message.sender == "agent",
                                                       Message.kind == "report").order_by(Message.id.desc()))
@@ -228,6 +241,34 @@ def _review_task(session: Session, run: Run, agent: Agent) -> None:
           start_note=f"タスク「{task.title}」のレビューを始めます。")
 
 
+TRIAGE_RULES = """
+## 新しいタスクの割り振り（マネージャーとして）
+オフィス長がバックログに新しいタスクを置きました。list_members でメンバーのロール・スキル・担当中のタスク数を確かめ、
+- 1人で終えられる大きさなら assign_task で、ロールとスキルに合い、手が空いている人に任せます。成果物があるならレビュアーのロールの人を reviewer にします。
+- 調査・作成・確認など複数の役割が要る大きさなら decompose_task でサブタスクに分けます。
+理由は1文でオフィス長に分かるように書きます。
+""".strip()
+
+
+def triage_brief(session: Session, project: Project, task: Task) -> str:
+    return "\n".join(_project_section(project) + [
+        "", "## 新しいタスク", f"タイトル: {task.title}", f"指示: {task.instructions or '（タイトルのとおり）'}",
+        f"期待する成果物: {task.expected_output or '（指定なし）'}", f"優先度: {PRIORITY_LABEL[task.priority]}",
+        "", "このタスクを誰に任せるか（または分けるか）を決めてください。",
+    ])
+
+
+def _triage_task(session: Session, run: Run, agent: Agent) -> None:
+    task = session.get(Task, run.task_id)
+    project = session.get(Project, run.project_id)
+    if task is None or task.assignee_id is not None or task.status != "backlog":
+        run.status, run.ended_at = "cancelled", work.now()  # someone already took care of it
+        session.commit()
+        return
+    _loop(session, run, agent, project, task=task, plan=None, rules=TRIAGE_RULES, kind_override="triage",
+          first=lambda: triage_brief(session, project, task), start_note=f"タスク「{task.title}」の割り振りを考えます。")
+
+
 def _plan_request(session: Session, run: Run, agent: Agent) -> None:
     plan = session.get(Plan, run.plan_id)
     project = session.get(Project, run.project_id)
@@ -236,8 +277,8 @@ def _plan_request(session: Session, run: Run, agent: Agent) -> None:
 
 
 def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: Task | None, plan: Plan | None,
-          rules: str, first, start_note: str, review: bool = False) -> None:
-    kind = "plan" if plan is not None else "review" if review else "task"
+          rules: str, first, start_note: str, review: bool = False, kind_override: str | None = None) -> None:
+    kind = kind_override or ("plan" if plan is not None else "review" if review else "task")
     model = open_model(agent.model_profile)
     ctx = ToolContext.build(session, agent, project, task, kind, plan.id if plan else None)
     system = [{"type": "text", "text": persona(agent) + ("\n\n" + rules if rules else "")}]
@@ -298,7 +339,8 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
             if not nudged:
                 nudged = True
                 nudge = {"plan": "計画ができたら propose_plan で提案してください。",
-                         "review": "レビューが終わったら approve_work か request_changes で結果を返してください。"}.get(
+                         "review": "レビューが終わったら approve_work か request_changes で結果を返してください。",
+                         "triage": "assign_task か decompose_task で決めてください。"}.get(
                     kind, "作業を続けてください。終わっているなら finish で報告してください。")
                 messages.append({"role": "user", "content": [{"type": "text", "text": nudge}]})
                 _save(run, messages)
@@ -310,6 +352,9 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
             if kind == "review":
                 _save(run, messages)
                 raise LLMError("レビュー担当が結論を出しませんでした")
+            if kind == "triage":
+                _save(run, messages)
+                raise LLMError("マネージャーが割り振りを決めませんでした。担当者を選んでください")
             summary = next((b["text"] for b in reversed(content) if b["type"] == "text"), "（報告なし）")
             _finish_without_tool(session, run, agent, task, messages, summary)
             return
@@ -320,6 +365,11 @@ def _loop(session: Session, run: Run, agent: Agent, project: Project, *, task: T
                 items, errors = work.validate_plan(project, use.get("input") or {})
                 if errors:
                     results.append(_error_result(session, run, use, "計画に直すところがあります:\n- " + "\n- ".join(errors)))
+                    continue
+            if use["name"] == "assign_task" and pause is None:
+                problem = _check_assignment(project, use.get("input") or {})
+                if problem:
+                    results.append(_error_result(session, run, use, problem))
                     continue
             if use["name"] in PAUSING and pause is None:
                 pause = use
@@ -400,6 +450,26 @@ def _pause(session: Session, run: Run, agent: Agent, project: Project, task: Tas
         run.status = "succeeded"
         run.ended_at = work.now()
         run.pending_tool_use_id = None
+    elif use["name"] in ("assign_task", "decompose_task"):
+        reason = str(args.get("reason", "")).strip()
+        _step(session, run, "tool_call", use["name"], json.dumps(args, ensure_ascii=False))
+        if use["name"] == "assign_task":
+            members = {m.agent.name: m.agent for m in project.members if m.agent.active}
+            assignee = members[str(args["assignee"]).strip()]
+            reviewer = members.get(str(args.get("reviewer") or "").strip())
+            task.assignee_id = assignee.id
+            task.reviewer_id = reviewer.id if reviewer and reviewer.id != assignee.id else None
+            if args.get("priority") in ("high", "normal", "low"):
+                task.priority = args["priority"]
+            note = f"（レビュー: {reviewer.name}さん）" if task.reviewer_id else ""
+            post(session, sender="agent", kind="report", agent_id=agent.id, project_id=project.id, task_id=task.id,
+                 run_id=run.id, body=f"タスク「{task.title}」を{assignee.name}さんに任せます{note}。{reason}")
+            work.schedule(session, project.id)
+        else:
+            post(session, sender="agent", kind="report", agent_id=agent.id, project_id=project.id, task_id=task.id,
+                 run_id=run.id, body=f"タスク「{task.title}」はサブタスクに分けて進めます。{reason}")
+            work.decompose(session, task)
+        run.status, run.ended_at, run.pending_tool_use_id = "succeeded", work.now(), None
     elif use["name"] == "propose_plan":
         summary = str(args.get("summary", "")).strip()
         _step(session, run, "tool_call", "propose_plan", summary)
@@ -410,6 +480,8 @@ def _pause(session: Session, run: Run, agent: Agent, project: Project, task: Tas
         run.ended_at = work.now()
         post(session, sender="agent", kind="plan", agent_id=agent.id, project_id=project.id, run_id=run.id,
              body=f"計画を提案します（タスク{len(items)}件）。\n\n{summary}")
+        if not project.require_plan_approval:
+            work.approve_plan(session, plan)  # the office head chose to let the manager go ahead
     else:
         summary = str(args.get("summary", "")).strip() or "（報告の内容が空です）"
         _step(session, run, "tool_call", "finish", summary)
@@ -434,6 +506,40 @@ def _report(session: Session, run: Run, agent: Agent, task: Task, summary: str) 
     run.ended_at = work.now()
     work.place_task(session, task, "review")
     work.send_to_review(session, task)
+
+
+def _check_assignment(project: Project, args: dict) -> str:
+    members = {m.agent.name: m.agent for m in project.members if m.agent.active}
+    name, reviewer = str(args.get("assignee", "")).strip(), str(args.get("reviewer") or "").strip()
+    if name not in members:
+        return f"担当「{name}」はメンバーにいません（{', '.join(members)}）"
+    if reviewer and reviewer not in members:
+        return f"レビュー担当「{reviewer}」はメンバーにいません"
+    return ""
+
+
+def _create_request(session: Session, run: Run, agent: Agent, use: dict) -> dict:
+    """create_request in a thread: the contact manager files the office head's ask with one of its projects."""
+    args = use.get("input") or {}
+    name, request = str(args.get("project", "")).strip(), str(args.get("request", "")).strip()
+    _step(session, run, "tool_call", "create_request", f"{name}: {request}")
+    managed = _managed_projects(session, agent)
+    project = next((p for p in managed if p.name == name), None)
+    if project is None:
+        choices = "、".join(p.name for p in managed) or "なし"
+        return _error_result(session, run, use, f"「{name}」はあなたが窓口のプロジェクトではありません（窓口のプロジェクト: {choices}）",
+                             logged=True)
+    if not request:
+        return _error_result(session, run, use, "依頼の内容が空です", logged=True)
+    work.request_plan(session, project, request)
+    _step(session, run, "tool_result", "create_request", f"プロジェクト「{project.name}」に依頼を登録しました")
+    return {"type": "tool_result", "tool_use_id": use["id"],
+            "content": f"プロジェクト「{project.name}」に依頼として登録しました。計画ができたらオフィス長に提案します。"}
+
+
+def _managed_projects(session: Session, agent: Agent) -> list[Project]:
+    return [p for p in session.scalars(select(Project).where(Project.status.not_in(("archived", "done"))))
+            if work.primary_manager(p) is not None and work.primary_manager(p).id == agent.id]
 
 
 def _consult(session: Session, run: Run, agent: Agent, project: Project, task: Task | None, use: dict) -> dict:
@@ -579,6 +685,16 @@ def _reply_in_thread(session: Session, run: Run, agent: Agent) -> None:
                + "\n".join(rooms_note)}]
     tools = [DEFINITIONS[n] for n in CHAT_TOOLS] + server_tools_for(agent, "chat", model.profile.provider,
                                                                   model.profile.model)
+    managed = _managed_projects(session, agent)
+    if managed:
+        tools.append(DEFINITIONS["create_request"])
+        rooms_note += ["", "## あなたが窓口のプロジェクト", "、".join(p.name for p in managed),
+                       "オフィス長から仕事を頼まれたら、確認の質問より先に create_request でそのプロジェクトに依頼として"
+                       "登録します。細かい確認は、登録後の計画づくりの中で行います。",
+                       "どのプロジェクトか分からないときだけ、登録の前に確認します。",
+                       "create_request を使っていないのに「計画を立てます」「進めます」とは言いません。"]
+        system = [{"type": "text", "text": persona(agent) + "\n\n" + _status_briefing(session, agent)
+                   + "\n".join(rooms_note)}]
     reply = ""
     for _ in range(MAX_CHAT_STEPS):
         response = model.create(system=system, tools=tools, messages=messages)
@@ -594,7 +710,9 @@ def _reply_in_thread(session: Session, run: Run, agent: Agent) -> None:
         uses = [b for b in content if b["type"] == "tool_use"]
         if not uses:
             break
-        messages.append({"role": "user", "content": [_call_tool(session, run, ctx, u) for u in uses]})
+        messages.append({"role": "user", "content": [
+            _create_request(session, run, agent, u) if u["name"] == "create_request" else _call_tool(session, run, ctx, u)
+            for u in uses]})
     post(session, sender="agent", kind="chat", agent_id=agent.id, run_id=run.id,
          body=reply or "（調べきれませんでした。質問を具体的にしてもう一度聞いてください）")
     run.status, run.ended_at = "succeeded", work.now()
@@ -636,6 +754,8 @@ def _recent_reports(session: Session, agent: Agent, project: Project, limit: int
 
 def _task_state(session: Session, task: Task) -> str:
     run = work.open_run(session, task)
+    if task.status == "in_progress" and work.unfinished_subtasks(session, task):
+        return "サブタスクを進めている（全部終わったら取りまとめる）"
     if task.status == "in_progress":
         if run is not None and run.status in ("queued", "running"):
             return "作業中（いま進めている）"
@@ -688,7 +808,7 @@ def _fail(session: Session, run: Run, agent: Agent | None, reason: str) -> None:
         agent = session.get(Agent, agent.id)
         agent.status = "error"
         task = session.get(Task, run.task_id) if run.task_id else None
-        what = ({"plan": "計画づくり", "reflect": "振り返り", "chat": "返信"}.get(run.kind)
+        what = ({"plan": "計画づくり", "reflect": "振り返り", "chat": "返信", "triage": "タスクの割り振り"}.get(run.kind)
                 or (f"タスク「{task.title}」の{'レビュー' if run.kind == 'review' else '作業'}" if task else "作業"))
         if run.kind == "review" and task is not None and task.review_stage == "peer":
             task.review_stage = "manager"  # the office head reviews it instead

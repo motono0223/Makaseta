@@ -170,6 +170,7 @@ export type Project = {
   due_date: string | null;
   status: ProjectStatus;
   require_plan_approval: boolean;
+  auto_manage: boolean;
   members: ProjectMember[];
   rooms: RoomLink[];
   task_counts: Partial<Record<TaskStatus, number>>;
@@ -184,6 +185,7 @@ export type ProjectInput = {
   due_date: string | null;
   status?: ProjectStatus;
   require_plan_approval: boolean;
+  auto_manage: boolean;
 };
 
 export type MemberInput = { agent_id: number; role_id: number; is_primary: boolean };
@@ -204,6 +206,8 @@ export type Task = {
   depends_on: number[];
   review_stage: "peer" | "manager" | null;
   peer_rounds: number;
+  parent_id: number | null;
+  managing: boolean;
   rank: number;
   created_at: string;
   updated_at: string;
@@ -303,6 +307,7 @@ export type PlanItem = {
 export type Plan = {
   id: number;
   project_id: number;
+  parent_task_id: number | null;
   agent_id: number | null;
   request: string;
   status: "drafting" | "proposed" | "approved" | "cancelled";
@@ -463,6 +468,7 @@ export const api = {
   updateTask: (id: number, input: Partial<TaskInput>) => request<Task>("PATCH", `/api/tasks/${id}`, input),
   moveTask: (id: number, status: TaskStatus, position: number) =>
     request<Task>("POST", `/api/tasks/${id}/move`, { status, position }),
+  decomposeTask: (id: number) => request<Task>("POST", `/api/tasks/${id}/decompose`),
   deleteTask: (id: number) => request<void>("DELETE", `/api/tasks/${id}`),
   assignments: (agentId: number) => request<Assignment[]>("GET", `/api/agents/${agentId}/assignments`),
 

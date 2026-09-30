@@ -98,7 +98,7 @@ export default function ProjectThread({ project, tasks, onChanged }: { project: 
   );
 }
 
-function PlanCard({ plan, busy, onAct }: { plan: Plan; busy: boolean; onAct: (a: () => Promise<unknown>) => void }) {
+export function PlanCard({ plan, busy, onAct }: { plan: Plan; busy: boolean; onAct: (a: () => Promise<unknown>) => void }) {
   const [comment, setComment] = useState("");
   const failed = plan.run_status === "failed" || plan.run_status === "interrupted";
   return (
@@ -136,7 +136,7 @@ function PlanCard({ plan, busy, onAct }: { plan: Plan; busy: boolean; onAct: (a:
                 <div className="muted small pre-line">{item.instructions}</div>
               </li>
             ))}
-            <li className="muted small">最後に、マネージャーの取りまとめタスクが追加されます。</li>
+            <li className="muted small">全部終わったら、マネージャーが取りまとめて報告します。</li>
           </ol>
           <textarea rows={2} value={comment} onChange={(e) => setComment(e.target.value)}
             placeholder="差し戻す場合は、直してほしい点を書いてください" />

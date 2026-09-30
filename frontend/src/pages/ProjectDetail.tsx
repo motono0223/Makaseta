@@ -145,6 +145,7 @@ export default function ProjectDetail() {
       {editing && (
         <TaskDialog
           task={editing === "new" ? null : editing}
+          tasks={tasks}
           members={project.members}
           onSave={saveTask}
           onDelete={editing === "new" ? undefined : async () => {
@@ -199,8 +200,8 @@ function ProjectSettings({ project, onSaved, onDeleted }: {
 
   async function saveFields(e: FormEvent) {
     e.preventDefault();
-    const { name, goal, done_criteria, due_date, require_plan_approval } = fields;
-    await run(() => api.updateProject(project.id, { name, goal, done_criteria, due_date, require_plan_approval }),
+    const { name, goal, done_criteria, due_date, require_plan_approval, auto_manage } = fields;
+    await run(() => api.updateProject(project.id, { name, goal, done_criteria, due_date, require_plan_approval, auto_manage }),
       "概要を保存しました");
   }
 

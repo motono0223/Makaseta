@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Run, Task, TaskWork, api } from "../api";
+import { Plan, ProjectMember, Run, Task, TaskWork, api } from "../api";
+import { TASK_STATUS } from "../labels";
+import { PlanCard } from "./ProjectThread";
 import { formatDate, formatSize } from "../format";
 import { usePolling } from "../usePolling";
 import Markdown from "./Markdown";
@@ -37,18 +39,22 @@ const STEP_LABEL: Record<string, string> = {
   request_changes: "レビュー: 修正を依頼",
 };
 
-type Props = { task: Task; onChanged: () => void };
+type Props = { task: Task; tasks: Task[]; members: ProjectMember[]; onChanged: () => void };
 
-/** What the assignee is doing on a task, and the office head's actions: answer, review, retry, stop. */
-export default function TaskWorkPanel({ task, onChanged }: Props) {
+/** What the assignee is doing on a task, and the office head's actions: answer, review, retry, stop, split. */
+export default function TaskWorkPanel({ task, tasks, members, onChanged }: Props) {
   const [data, setData] = useState<TaskWork | null>(null);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api.taskWork(task.id).then(setData).catch((e: Error) => setError(e.message));
-  }, [task.id]);
+    api.plans(task.project_id)
+      .then((all) => setPlans(all.filter((p) => p.parent_task_id === task.id && (p.status === "drafting" || p.status === "proposed"))))
+      .catch(() => undefined);
+  }, [task.id, task.project_id]);
 
   const latest = data?.runs[0];
   const live = latest?.status === "queued" || latest?.status === "running";
@@ -77,12 +83,45 @@ export default function TaskWorkPanel({ task, onChanged }: Props) {
   }
 
   if (!data) return <p className="muted">読み込み中…</p>;
+  const children = tasks.filter((t) => t.parent_id === task.id);
+  const nameOf = (id: number | null) => members.find((m) => m.agent.id === id)?.agent.name ?? "未割当";
+  const canSplit = task.status === "backlog" && children.length === 0 && !task.managing && plans.length === 0;
   const drafts = data.deliverables.filter((d) => d.status === "draft");
   const failed = latest && (latest.status === "failed" || latest.status === "interrupted" || latest.status === "cancelled");
 
   return (
     <div className="work-panel">
       {error && <p className="status bad">{error}</p>}
+
+      {plans.map((plan) => (
+        <PlanCard key={plan.id} plan={plan} busy={busy} onAct={act} />
+      ))}
+
+      {children.length > 0 && (
+        <div className="subtasks">
+          <div className="small"><strong>サブタスク（{children.filter((c) => c.status === "done").length}/{children.length} 完了）</strong></div>
+          <ul className="task-list">
+            {children.map((c) => (
+              <li key={c.id}>
+                <span className={`badge task-${c.status}`}>{TASK_STATUS[c.status]}</span> {c.title}
+                <span className="muted small"> · {nameOf(c.assignee_id)}</span>
+              </li>
+            ))}
+          </ul>
+          {task.status === "in_progress" && children.some((c) => c.status !== "done") && (
+            <p className="muted small">サブタスクが全部終わると、{nameOf(task.assignee_id)}さんが取りまとめて報告します。</p>
+          )}
+        </div>
+      )}
+
+      {canSplit && (
+        <div className="form-actions">
+          <button type="button" className="btn" disabled={busy} onClick={() => act(() => api.decomposeTask(task.id))}>
+            🧭 マネージャーに分解させる
+          </button>
+          <span className="muted small">大きなタスクを、マネージャーがサブタスクに分けてメンバーに割り振ります</span>
+        </div>
+      )}
 
       {data.question && task.status === "waiting" && (
         <div className="callout question">
@@ -170,8 +209,11 @@ export default function TaskWorkPanel({ task, onChanged }: Props) {
         </div>
       )}
 
-      {data.runs.length === 0 && (
-        <p className="muted">まだ作業していません。担当者を決めてカードを「作業中」に移すと、社員が作業を始めます。</p>
+      {data.runs.length === 0 && children.length === 0 && plans.length === 0 && (
+        <p className="muted">
+          {task.managing ? "マネージャーが割り振りを考えています。"
+            : "まだ作業していません。担当者を決めてカードを「作業中」に移すと、社員が作業を始めます。"}
+        </p>
       )}
 
       {data.runs.map((run, index) => (

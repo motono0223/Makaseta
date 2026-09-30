@@ -5,6 +5,7 @@ import TaskWorkPanel from "./TaskWorkPanel";
 
 type Props = {
   task: Task | null; // null = new task
+  tasks?: Task[];
   members: ProjectMember[];
   onSave: (input: TaskInput) => Promise<void>;
   onDelete?: () => Promise<void>;
@@ -22,7 +23,7 @@ const EMPTY: TaskInput = {
   reviewer_id: null,
 };
 
-export default function TaskDialog({ task, members, onSave, onDelete, onClose, onChanged }: Props) {
+export default function TaskDialog({ task, tasks = [], members, onSave, onDelete, onClose, onChanged }: Props) {
   const [values, setValues] = useState<TaskInput>(task ? { ...task } : EMPTY);
   const [tab, setTab] = useState<"work" | "edit">(task && task.status !== "backlog" ? "work" : "edit");
   const [saving, setSaving] = useState(false);
@@ -74,7 +75,9 @@ export default function TaskDialog({ task, members, onSave, onDelete, onClose, o
           <button type="button" className={tab === "edit" ? "active" : ""} onClick={() => setTab("edit")}>内容</button>
         </nav>
       )}
-      {task && tab === "work" && <TaskWorkPanel task={task} onChanged={() => onChanged?.()} />}
+      {task && tab === "work" && (
+        <TaskWorkPanel task={task} tasks={tasks} members={members} onChanged={() => onChanged?.()} />
+      )}
       <form className="form" onSubmit={submit} hidden={!!task && tab !== "edit"}>
         {!task && <h2>タスクを追加</h2>}
         <div className="field">

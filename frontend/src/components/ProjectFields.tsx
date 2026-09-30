@@ -33,6 +33,10 @@ export default function ProjectFields({ value, onChange }: Props) {
           onChange={(e) => set("require_plan_approval", e.target.checked)} />
         マネージャーが作ったタスク分解案は、オフィス長が承認してから実行する
       </label>
+      <label className="toggle">
+        <input type="checkbox" checked={value.auto_manage} onChange={(e) => set("auto_manage", e.target.checked)} />
+        マネージャーにバックログを任せる（担当者のいないタスクの割り振りと、手が空いた社員への着手の指示）
+      </label>
     </>
   );
 }

@@ -74,7 +74,22 @@ export default function Kanban({ tasks, members, onOpen, onAdd, onMove }: Props)
                   tabIndex={0}
                   onKeyDown={(e) => e.key === "Enter" && onOpen(t)}
                 >
+                  {t.parent_id && (
+                    <span className="muted small parent-label">↳ {tasks.find((x) => x.id === t.parent_id)?.title ?? "親タスク"}</span>
+                  )}
                   <div className="task-title">{t.title}</div>
+                  {(() => {
+                    const children = tasks.filter((x) => x.parent_id === t.id);
+                    if (children.length === 0) return null;
+                    const done = children.filter((x) => x.status === "done").length;
+                    return (
+                      <div className="subtask-progress">
+                        <span className="muted small">サブタスク {done}/{children.length}</span>
+                        <div className="progress"><div className="progress-bar" style={{ width: `${(done / children.length) * 100}%` }} /></div>
+                      </div>
+                    );
+                  })()}
+                  {t.managing && <span className="muted small">🧭 マネージャーが割り振りを考えています</span>}
                   {t.status === "review" && t.review_stage === "peer" && t.reviewer_id && (
                     <span className="muted small">👀 {agentById.get(t.reviewer_id)?.name ?? "レビュー担当"}さんが確認中</span>
                   )}

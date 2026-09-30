@@ -34,6 +34,8 @@ ALWAYS = {
     "plan": ["list_members", "ask_colleague", "ask_manager", "propose_plan"],
     # A reviewer can always read what it is reviewing, whatever its skills.
     "review": ["list_documents", "read_document", "read_deliverables", "approve_work", "request_changes"],
+    # The contact manager sorting a new card in a manager-run backlog.
+    "triage": ["list_members", "assign_task", "decompose_task"],
 }
 # Skill tools that make sense while planning (reading only; deliverables come from the tasks).
 PLAN_SKILL_TOOLS = {"search_documents", "list_documents", "read_document", "read_skill", "read_skill_file",
@@ -209,6 +211,42 @@ DEFINITIONS = {
             "required": ["name", "question"],
         },
     },
+    "assign_task": {
+        "name": "assign_task",
+        "description": "このタスクを1人のメンバーに任せる（1人で終えられる大きさのとき）。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "assignee": {"type": "string", "description": "担当するメンバーの名前"},
+                "reviewer": {"type": "string", "description": "成果物を先に確認するレビュー担当の名前（任意。担当とは別の人）"},
+                "priority": {"type": "string", "enum": ["high", "normal", "low"]},
+                "reason": {"type": "string", "description": "その人に任せる理由（オフィス長向け、1文）"},
+            },
+            "required": ["assignee", "reason"],
+        },
+    },
+    "decompose_task": {
+        "name": "decompose_task",
+        "description": "このタスクは1人では大きいので、サブタスクに分ける計画づくりに進む。",
+        "input_schema": {
+            "type": "object",
+            "properties": {"reason": {"type": "string", "description": "分ける理由（1文）"}},
+            "required": ["reason"],
+        },
+    },
+    "create_request": {
+        "name": "create_request",
+        "description": "オフィス長からの仕事の依頼を、あなたが窓口のプロジェクトに登録し、計画づくりを始める。"
+                       "相談や質問への返事ではなく、仕事を頼まれたときに使う。",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "project": {"type": "string", "description": "登録するプロジェクトの名前"},
+                "request": {"type": "string", "description": "依頼の内容（オフィス長の言葉をもとに、具体的に）"},
+            },
+            "required": ["project", "request"],
+        },
+    },
     "read_deliverables": {
         "name": "read_deliverables",
         "description": "レビュー対象のタスクで提出された成果物（下書き）を読む。",
@@ -289,7 +327,7 @@ DEFINITIONS = {
 def tools_for(agent: Agent, kind: str = "task") -> list[dict]:
     """Tool definitions for an agent's kind of work: skill tools plus the always-available ones, in a stable order."""
     names = {t for s in agent.skills if s.enabled for t in s.tools}
-    if kind in ("plan", "review"):
+    if kind in ("plan", "review", "triage"):
         names &= PLAN_SKILL_TOOLS
     names |= set(ALWAYS[kind])
     return [DEFINITIONS[n] for n in DEFINITIONS if n in names]
@@ -337,9 +375,10 @@ class ToolFailure(Exception):
 
 
 # Control-flow tools: the runner handles them itself.
-PAUSING = {"ask_manager", "finish", "propose_plan", "approve_work", "request_changes"}
+PAUSING = {"ask_manager", "finish", "propose_plan", "approve_work", "request_changes", "assign_task",
+           "decompose_task"}
 # Tools the runner answers itself because they call another agent's model.
-RUNNER_TOOLS = {"ask_colleague"}
+RUNNER_TOOLS = {"ask_colleague", "create_request"}
 
 
 def run_tool(ctx: ToolContext, name: str, args: dict) -> str:

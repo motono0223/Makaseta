@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     max_concurrent_runs: int = 3
     monthly_budget_usd: float = 50.0
     max_steps_per_run: int = 40
+    # How many tasks one agent works on at once when the manager starts backlog tasks.
+    max_active_tasks_per_agent: int = 1
     # After each review the assignee reflects and keeps what it learned in its 業務メモ.
     agent_reflection: bool = True
     # USD per web search (Anthropic web search is billed per search on top of tokens).

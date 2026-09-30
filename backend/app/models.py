@@ -154,6 +154,8 @@ class Project(Base):
     # planning | active | paused | done | archived
     status: Mapped[str] = mapped_column(String(16), default="planning")
     require_plan_approval: Mapped[bool] = mapped_column(Boolean, default=True)
+    # The contact manager triages new unassigned cards and starts backlog tasks as members become free.
+    auto_manage: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -212,6 +214,8 @@ class Task(Base):
     # Set when the task came from a manager's plan; depends_on lists task ids that must be done first.
     plan_id: Mapped[int | None] = mapped_column(ForeignKey("plans.id", ondelete="SET NULL"))
     depends_on: Mapped[list] = mapped_column(JSON, default=list)
+    # A subtask points at the task it was split from; the parent is wrapped up once all subtasks are done.
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), index=True)
     # While in review: "peer" = the reviewer agent is checking it, "manager" (or None) = waiting for the office head.
     review_stage: Mapped[str | None] = mapped_column(String(8))
     # How many times the reviewer agent has sent it back; after the limit it goes to the office head.
@@ -232,6 +236,10 @@ class Plan(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     agent_id: Mapped[int | None] = mapped_column(ForeignKey("agents.id", ondelete="SET NULL"))
     request: Mapped[str] = mapped_column(Text)
+    # The task this plan splits into subtasks (a card, or the task created for a thread request).
+    parent_task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    # True when the parent task was created for this plan (a thread request), so cancelling removes it.
+    owns_parent: Mapped[bool] = mapped_column(Boolean, default=False)
     # drafting | proposed | approved | cancelled
     status: Mapped[str] = mapped_column(String(12), default="drafting")
     summary: Mapped[str] = mapped_column(Text, default="")
@@ -247,7 +255,7 @@ class Run(Base):
     __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # task | plan | chat | reflect | review (a reviewer agent checking a task)
+    # task | plan | chat | reflect | review (a reviewer agent checking a task) | triage (manager sorting a new card)
     kind: Mapped[str] = mapped_column(String(8), default="task")
     agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))

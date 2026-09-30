@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, object_session
@@ -71,6 +71,7 @@ class ProjectOut(BaseModel):
     due_date: date | None
     status: ProjectStatus
     require_plan_approval: bool
+    auto_manage: bool
     members: list[MemberOut]
     rooms: list[RoomLinkOut]
     task_counts: dict[str, int]
@@ -96,6 +97,7 @@ class ProjectCreate(BaseModel):
     due_date: date | None = None
     status: ProjectStatus = "active"
     require_plan_approval: bool = True
+    auto_manage: bool = True
     members: list[MemberIn]
     rooms: list[RoomLinkIn] = []
 
@@ -107,6 +109,7 @@ class ProjectUpdate(BaseModel):
     due_date: date | None = None
     status: ProjectStatus | None = None
     require_plan_approval: bool | None = None
+    auto_manage: bool | None = None
 
 
 class TaskOut(BaseModel):
@@ -127,6 +130,9 @@ class TaskOut(BaseModel):
     depends_on: list[int]
     review_stage: str | None
     peer_rounds: int
+    parent_id: int | None
+    # The manager is deciding who takes it, or splitting it into subtasks.
+    managing: bool = False
     rank: int
     created_at: datetime
     updated_at: datetime
@@ -196,6 +202,7 @@ def create_project(body: ProjectCreate, session: SessionDep) -> ProjectOut:
         due_date=body.due_date,
         status=body.status,
         require_plan_approval=body.require_plan_approval,
+        auto_manage=body.auto_manage,
     )
     session.add(project)
     _set_members(session, project, body.members)
@@ -217,6 +224,8 @@ def update_project(project_id: int, body: ProjectUpdate, session: SessionDep) ->
         if value is None and field != "due_date":
             continue
         setattr(project, field, value)
+    if body.auto_manage or body.status == "active":
+        work.schedule(session, project.id)
     session.commit()
     return get_project(project_id, session)
 
@@ -251,8 +260,10 @@ def delete_project(project_id: int, session: SessionDep) -> None:
 @router.get("/projects/{project_id}/tasks")
 def list_tasks(project_id: int, session: SessionDep) -> list[TaskOut]:
     _get_project(session, project_id)
-    return list(session.scalars(select(Task).where(Task.project_id == project_id).order_by(Task.status, Task.rank,
-                                                                                           Task.id)))
+    tasks = list(session.scalars(select(Task).where(Task.project_id == project_id).order_by(Task.status, Task.rank,
+                                                                                            Task.id)))
+    return [TaskOut.model_validate(t).model_copy(update={
+        "managing": work.triaging(session, t) or work.planning(session, t)}) for t in tasks]
 
 
 @router.post("/projects/{project_id}/tasks", status_code=status.HTTP_201_CREATED)
@@ -262,7 +273,21 @@ def create_task(project_id: int, body: TaskCreate, session: SessionDep) -> TaskO
     _check_member(project, body.reviewer_id, "レビュー担当")
     task = Task(project_id=project.id, rank=_next_rank(session, project.id, "backlog"), **body.model_dump())
     session.add(task)
+    session.flush()
+    if task.assignee_id is None:
+        work.queue_triage(session, task)
+    else:
+        work.schedule(session, project.id)
     session.commit()
+    return task
+
+
+@router.post("/tasks/{task_id}/decompose")
+def decompose_task(task_id: int, session: SessionDep, request: Request) -> TaskOut:
+    task = _get_task(session, task_id)
+    work.decompose(session, task)
+    session.commit()
+    request.app.state.worker.wake()
     return task
 
 
@@ -287,6 +312,8 @@ def update_task(task_id: int, body: TaskUpdate, session: SessionDep) -> TaskOut:
         work.place_task(session, task, new_status)
     _check_assignable(task)
     work.on_status_change(session, task, old_status, task.status)
+    if "assignee_id" in changes and task.status == "backlog":
+        work.schedule(session, task.project_id)
     session.commit()
     return task
 
@@ -357,6 +384,7 @@ def _project_out(project: Project, counts: dict[str, int]) -> ProjectOut:
         due_date=project.due_date,
         status=project.status,
         require_plan_approval=project.require_plan_approval,
+        auto_manage=project.auto_manage,
         members=[MemberOut.model_validate(m) for m in project.members],
         rooms=[RoomLinkOut(room=r.room, access=r.access, exists=r.room in existing_rooms,
                            confidential=r.room in confidential) for r in project.rooms],
