@@ -7,6 +7,8 @@ AI社員に仕事を任せる、あなただけの仮想オフィス。
 
 > **English:** makaseta ("I'll leave it to you" in Japanese) is a self-hosted virtual office where you manage LLM agents as employees: hire them, form project teams, let a manager agent run the backlog, and review their deliverables. Runs locally with Docker and uses Claude via the Anthropic API or AWS Bedrock. The UI is in Japanese.
 
+![カンバン: マネージャーが仕事をサブタスクに分け、社員が進めている様子](docs/images/kanban.png)
+
 > 開発中です。画面やデータの形は、予告なく変わることがあります。
 
 ## 特長
@@ -18,6 +20,14 @@ AI社員に仕事を任せる、あなただけの仮想オフィス。
 - **社員が育つ**: 承認や差し戻しのたびに振り返り、学んだことを「業務メモ」に残して次の仕事に活かします。
 - **スキルとWeb検索**: [Agent Skills](https://github.com/anthropics/skills) を GitHub から導入し、PowerPoint などのファイルも作れます。スクリプトは隔離したサンドボックスで動きます。
 - **ローカルで完結**: Docker Compose で起動し、データはすべて手元に保存します。モデルは Anthropic API または AWS Bedrock の Claude を使います。
+
+## 画面
+
+| マネージャーの計画 | 成果物のレビュー |
+| --- | --- |
+| ![マネージャーが依頼をサブタスクに分けた計画](docs/images/plan.png) | ![レビュー担当の所見と成果物](docs/images/review.png) |
+| **社員との会話** | **社員の業務メモ** |
+| ![社員のスレッド](docs/images/chat.png) | ![承認や差し戻しから学んだ業務メモ](docs/images/staff-detail.png) |
 
 ## はじめかた
 
@@ -40,12 +50,12 @@ docker compose up -d --build
 4. **カンバン**にカードを置くか、マネージャーに話しかけて仕事を頼みます。
 5. 社員からの質問と成果物が**受信箱**に届くので、答えたり承認したりします。
 
-詳しくは [使い方ガイド](docs/USAGE.md) を見てください。
+詳しくは [使い方ガイド](docs/GUIDE.md) を見てください。
 
 ## ドキュメント
 
 - [インストールと設定](docs/INSTALL.md): インストール、LLMの設定、ポート、パスワード、データの保存場所、アップデート、PCの引っ越し
-- [使い方ガイド](docs/USAGE.md): 仕事の任せ方、ファイルの指定、資料室、Web検索、スキル
+- [使い方ガイド](docs/GUIDE.md): 仕事の任せ方、ファイルの指定、資料室、Web検索、スキル
 - [開発](docs/DEVELOPMENT.md): 構成と開発環境
 
 ## ライセンス

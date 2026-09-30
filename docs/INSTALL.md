@@ -90,7 +90,7 @@ MAKASETA_PASSWORD=長く推測されにくいパスワード
 
 ホストの `./library` フォルダが資料室の置き場です。直下のフォルダ1つが1つの資料室になります。別の場所（例: Windows のフォルダ `/mnt/c/Users/you/Documents/makaseta`）を使う場合は、`.env` の `LIBRARY_DIR` を変更します。
 
-資料室の使い方は [使い方ガイド](USAGE.md#資料室) を見てください。
+資料室の使い方は [使い方ガイド](GUIDE.md#資料室の詳しい使い方) を見てください。
 
 ## .env の設定一覧
 
